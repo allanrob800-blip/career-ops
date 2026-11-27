@@ -59,7 +59,25 @@ export function parseCvAssets(text) {
 }
 
 const CV_PAGES_MAX = 6;
-const ANSWERS_MAX = 20;
+// Display bounds of apps[i].dossier (ruling R9), so one app item stays well under a snapshot part's size.
+const SHEET_STRING_MAX = 300;
+const SHEET_LIST_MAX = 8;
+const ANSWERS_MAX = 12;
+const ANSWER_Q_MAX = 300;
+const ANSWER_A_MAX = 1000;
+const REASONS_MAX = 5;
+const REASON_MAX = 200;
+const clip = (s, max) => {
+  const cps = [...s];
+  return cps.length > max ? `${cps.slice(0, max - 1).join('')}…` : s;
+};
+// The validated sheet for display: every string at most 300 characters, every list at most 8 items, at any depth.
+const displaySheet = (v) => {
+  if (typeof v === 'string') return clip(v, SHEET_STRING_MAX);
+  if (Array.isArray(v)) return v.slice(0, SHEET_LIST_MAX).map(displaySheet);
+  if (isObj(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, displaySheet(x)]));
+  return v;
+};
 // The cv_assets entry fields of the CV and of the letter (extensions/agents/record-assets.mjs writes both).
 const CV_FIELDS = { asset_id: 'asset_id', file: 'file', sha256: 'sha256', pages: 'pages' };
 const LETTER_FIELDS = { asset_id: 'letter_asset_id', file: 'letter_file', sha256: 'letter_sha256', pages: 'letter_pages' };
@@ -87,12 +105,12 @@ function cvFor(entry, hashes) {
 }
 
 // apps[i].dossier: what the dashboard shows of the dossier prepared for tracker row `num` (data/dossiers.json), with
-// its strategy sheet (input.strategies[num], bounded by validateSheet) and its letter assets. null when the store has
-// no valid dossier for that num.
+// its strategy sheet (input.strategies[num], bounded by validateSheet, then for display) and its letter assets. null
+// when the store has no valid dossier for that num. Answers and check reasons are bounded for display too.
 function dossierFor(store, num, sheets, assetEntry, hashes) {
   const d = isObj(store) && isObj(store.dossiers) ? store.dossiers[String(num)] : null;
   if (validateDossier(d) !== null) return null;
-  const sheet = isObj(sheets) && Object.hasOwn(sheets, String(num)) && isObj(sheets[String(num)]) ? validateSheet(sheets[String(num)]).sheet : null;
+  const sheet = isObj(sheets) && Object.hasOwn(sheets, String(num)) && isObj(sheets[String(num)]) ? displaySheet(validateSheet(sheets[String(num)]).sheet) : null;
   const letter = assetFor(assetEntry, LETTER_FIELDS, hashes);
   return {
     state: d.state,
@@ -100,10 +118,10 @@ function dossierFor(store, num, sheets, assetEntry, hashes) {
     letter_state: d.letter.state,
     has_why: typeof d.letter.why === 'string' && d.letter.why.trim() !== '',
     message: d.message,
-    answers: d.answers.slice(0, ANSWERS_MAX).map((x) => ({ q: x.q, a: x.a })),
+    answers: d.answers.slice(0, ANSWERS_MAX).map((x) => ({ q: clip(x.q, ANSWER_Q_MAX), a: clip(x.a, ANSWER_A_MAX) })),
     strategy: sheet,
     check_ok: d.check.ok,
-    check_reasons: d.check.reasons,
+    check_reasons: d.check.reasons.slice(0, REASONS_MAX).map((r) => clip(r, REASON_MAX)),
     retouche_pending: d.retouches.some((r) => r.done_at === null),
     letter_url: letter.url,
     letter_pages: letter.pages,

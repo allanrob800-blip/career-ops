@@ -267,9 +267,46 @@ test('dossier: a valid dossier gives its fields and its bounded strategy sheet',
   assert.ok(s.apps.filter((a) => a.num !== 3).every((a) => a.dossier === null));
 });
 
-test('dossier: a sheet field of 5000 characters is bounded to 600', () => {
+test('dossier: a sheet field of 5000 characters is bounded (600 by validateSheet, then 300 for display, R9)', () => {
   const s = buildSnapshot(withDossiers({ 3: DOSSIER() }, { strategies: { 3: SHEET({ angle: 'x'.repeat(5000) }) } }));
-  assert.equal([...s.apps.find((a) => a.num === 3).dossier.strategy.angle].length, 600);
+  const angle = s.apps.find((a) => a.num === 3).dossier.strategy.angle;
+  assert.equal([...angle].length, 300);
+  assert.ok(angle.endsWith('…'));
+});
+
+test('dossier (R9): sheet strings at most 300 characters and lists at most 8 items, at every depth', () => {
+  const long = 'é'.repeat(700);
+  const twelve = (f) => Array.from({ length: 12 }, (_, i) => f(i));
+  const sheet = SHEET({
+    titre_cv: long, angle: long, lettre_angle: long,
+    preuves: twelve((i) => ({ texte: `${i}${long}`, source: `cv.md ${long}` })),
+    mots_cles_repris: twelve((i) => `${i}${long}`),
+    mots_cles_ecartes: twelve((i) => ({ mot: `${i}${long}`, raison: long })),
+    ecarts: twelve((i) => ({ exigence: `${i}${long}`, traitement: long })),
+    verification: { ok: false, reasons: twelve((i) => `${i}${long}`) },
+  });
+  const st = buildSnapshot(withDossiers({ 3: DOSSIER() }, { strategies: { 3: sheet } })).apps.find((a) => a.num === 3).dossier.strategy;
+  const strings = [];
+  const lists = [];
+  const walk = (v) => {
+    if (typeof v === 'string') strings.push(v);
+    else if (Array.isArray(v)) { lists.push(v); v.forEach(walk); } else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(st);
+  assert.ok(strings.length > 0 && strings.every((x) => [...x].length <= 300));
+  assert.deepEqual(lists.map((l) => l.length), [8, 8, 8, 8, 8]);
+  assert.equal(st.verification.ok, false);
+  assert.equal(st.preuves[7].texte.slice(0, 1), '7');
+});
+
+test('dossier (R9): answers at most 12 (q 300, a 1000 characters); check_reasons at most 5 of 200 characters', () => {
+  const answers = Array.from({ length: 15 }, (_, i) => ({ q: `${i}${'q'.repeat(400)}`, a: 'a'.repeat(1500) }));
+  const reasons = Array.from({ length: 7 }, (_, i) => `${i}${'r'.repeat(300)}`);
+  const d = buildSnapshot(withDossiers({ 3: DOSSIER({ answers, check: { ok: false, reasons } }) })).apps.find((a) => a.num === 3).dossier;
+  assert.equal(d.answers.length, 12);
+  assert.ok(d.answers.every((x) => [...x.q].length === 300 && [...x.a].length === 1000));
+  assert.deepEqual(d.check_reasons.map((r) => [...r].length), [200, 200, 200, 200, 200]);
+  assert.equal(d.check_reasons[4][0], '4');
 });
 
 test('dossier: no sheet, or a sheet that is not an object, gives strategy null', () => {
@@ -291,7 +328,7 @@ test('dossier: a num absent from the tracker is ignored; an invalid dossier give
   }
 });
 
-test('dossier: has_why, letter_state, retouche_pending, check reasons; answers capped at 20', () => {
+test('dossier: has_why, letter_state, retouche_pending, check reasons; answers capped at 12', () => {
   const answers = Array.from({ length: 25 }, (_, i) => ({ q: `Question ${i} ?`, a: `Réponse ${i}.` }));
   const s = buildSnapshot(withDossiers({
     3: DOSSIER({ letter: { state: 'prete', why: 'Leur produit plateforme.', why_at: '2026-11-26T20:00:00Z', pdf: 'output/003-lettre.pdf' }, answers }),
@@ -301,7 +338,7 @@ test('dossier: has_why, letter_state, retouche_pending, check reasons; answers c
     5: DOSSIER({ retouches: [{ text: 'Plus court.', at: '2026-11-25T10:00:00Z', done_at: '2026-11-26T07:00:00Z' }] }),
   }));
   const by = (n) => s.apps.find((a) => a.num === n).dossier;
-  assert.deepEqual([by(3).letter_state, by(3).has_why, by(3).answers.length, by(3).answers[19].q], ['prete', true, 20, 'Question 19 ?']);
+  assert.deepEqual([by(3).letter_state, by(3).has_why, by(3).answers.length, by(3).answers[11].q], ['prete', true, 12, 'Question 11 ?']);
   assert.deepEqual([by(4).state, by(4).has_why, by(4).retouche_pending, by(4).check_ok, by(4).check_reasons],
     ['a_refaire', false, true, false, ['mot-clé absent du CV : « roadmap »']]);
   assert.equal(by(5).retouche_pending, false);

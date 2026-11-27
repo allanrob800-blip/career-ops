@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toDocs, genId, syncPlan } from '../lib/chunk.mjs';
+import { toDocs, genId, syncPlan, fitsInPart } from '../lib/chunk.mjs';
 import { parseDbLines } from '../lib/db-lines.mjs';
 
 const size = (d) => Buffer.byteLength(JSON.stringify(d));
@@ -146,4 +146,20 @@ test('toDocs splits proposals into parts like the other arrays; syncPlan writes 
   for (const p of parts) assert.ok(flat.slice(0, metaAt).some((o) => o.op === 'set' && o.path === p.path), p.path);
   assert.deepEqual(flat.slice(metaAt + 1), [{ op: 'delete', path: 'snapshot/proposals-g0-0', ifVersion: 1 }]);
   assert.equal(toDocs(fakeSnapshot({ apps: 1 })).some((d) => d.path.startsWith('snapshot/proposals-')), false);
+});
+
+test('fitsInPart: true exactly for the items toDocs accepts alone in a part', () => {
+  const gen = '2026-11-27T10:00:00.000Z';
+  const overhead = size({ generation: gen, items: [] });
+  const item = (n) => ({ note: 'x'.repeat(n) });
+  const edge = 1000 - overhead - size(item(0));
+  assert.equal(fitsInPart(item(edge), gen, 1000), true);
+  assert.equal(fitsInPart(item(edge + 1), gen, 1000), false);
+  const s = fakeSnapshot({ apps: 0 });
+  s.apps = [item(edge)];
+  assert.doesNotThrow(() => toDocs(s, 1000));
+  s.apps = [item(edge + 1)];
+  assert.throws(() => toDocs(s, 1000), /maxBytes/);
+  assert.equal(fitsInPart(item(59000), gen), true);
+  assert.equal(fitsInPart(item(60000), gen), false);
 });

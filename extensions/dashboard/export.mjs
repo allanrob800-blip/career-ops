@@ -10,7 +10,7 @@ import { resolveColumns, parseTrackerRow, extractTrackerReportNumbers } from '..
 import { buildSnapshot, parseCvAssets } from './lib/snapshot.mjs';
 import { readDossiers, validateDossier } from '../agents/lib/dossiers.mjs';
 import { validateProposals, validateRelances } from '../agents/lib/suivi-files.mjs';
-import { toDocs, syncPlan } from './lib/chunk.mjs';
+import { toDocs, syncPlan, fitsInPart } from './lib/chunk.mjs';
 import { parseDbLines } from './lib/db-lines.mjs';
 
 const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '');
@@ -112,6 +112,18 @@ export function collectInput(now = new Date()) {
   };
 }
 
+// Last guard (ruling R9): an app whose item would not fit in a snapshot part loses its dossier, with a warning,
+// rather than stopping the whole export.
+function fitApps(snapshot) {
+  for (const a of snapshot.apps) {
+    if (a.dossier !== null && !fitsInPart(a, snapshot.generation)) {
+      warn(`app ${a.num}: dossier left out of the snapshot (too large for one part)`);
+      a.dossier = null;
+    }
+  }
+  return snapshot;
+}
+
 const argv = process.argv.slice(2);
 let current = null;
 if (argv.includes('--sync-plan')) {
@@ -125,7 +137,7 @@ if (argv.includes('--sync-plan')) {
     process.exit(1);
   }
 }
-const docs = toDocs(buildSnapshot(collectInput()));
+const docs = toDocs(fitApps(buildSnapshot(collectInput())));
 if (current) {
   process.stdout.write(JSON.stringify(syncPlan(docs, current)));
 } else if (argv.includes('--summary')) {

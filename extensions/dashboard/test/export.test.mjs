@@ -236,3 +236,45 @@ test('export CLI: letter_stale is true when the letter PDF changed since its upl
   writeJson(root, 'data/dashboard.json', dash);
   assert.equal(exportAt(root).apps[6].dossier.letter_stale, null); // outside the data root: never hashed
 }));
+
+// ---- R9: a maximal dossier fits in one part; an oversize one loses its dossier, not the export ----
+function maximalDossier(root, ch) {
+  const long = ch.repeat(600);
+  const twelve = (f) => Array.from({ length: 12 }, (_, i) => f(i));
+  writeJson(root, 'output/001-acme-strategie.json', {
+    titre_cv: long, angle: long, lettre_angle: long,
+    preuves: twelve(() => ({ texte: long, source: `cv.md ${long}` })),
+    mots_cles_repris: twelve(() => long),
+    mots_cles_ecartes: twelve(() => ({ mot: long, raison: long })),
+    ecarts: twelve(() => ({ exigence: long, traitement: long })),
+    verification: { ok: false, reasons: twelve(() => long) },
+  });
+  const store = readJson(root, 'data/dossiers.json');
+  Object.assign(store.dossiers['1'], {
+    message: ch.repeat(1200),
+    answers: Array.from({ length: 40 }, () => ({ q: ch.repeat(2000), a: ch.repeat(5000) })),
+    check: { ok: false, reasons: Array.from({ length: 40 }, () => ch.repeat(2000)) },
+  });
+  writeJson(root, 'data/dossiers.json', store);
+}
+
+test('export CLI (R9): a dossier with every field at its maximum exports, and its app item fits in a part', () => withRoot((root) => {
+  maximalDossier(root, 'x');
+  const r = exportAt(root);
+  assert.equal(r.stderr, '');
+  const a = r.apps[1];
+  assert.equal(a.dossier.strategy.preuves.length, 8);
+  assert.equal(a.dossier.answers.length, 12);
+  const itemBytes = Buffer.byteLength(JSON.stringify(a));
+  assert.ok(itemBytes < 60000, `${itemBytes} bytes`);
+}));
+
+test('export CLI (R9): an app item still too large for a part loses its dossier with a warning', () => withRoot((root) => {
+  maximalDossier(root, '\u{1F600}'); // 4 bytes per character in UTF-8
+  const r = exportAt(root);
+  assert.match(r.stderr, /app 1: dossier left out/);
+  assert.equal(r.apps[1].dossier, null);
+  assert.equal(r.apps[1].company, 'Acme');
+  assert.equal(r.apps[6].dossier.state, 'a_verifier');
+  assert.equal(Object.keys(r.apps).length, 8);
+}));

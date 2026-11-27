@@ -3,6 +3,7 @@ const META_KEYS = ['schema', 'generation', 'generated_at', 'profile', 'stats', '
 const ARRAYS = ['apps', 'offers', 'reports', 'proposals'];
 const META = 'snapshot/meta';
 const MAX_OPS = 50; // db_write: 1 to 50 ops per call
+const MAX_BYTES = 60000;
 
 const bytes = (v) => Buffer.byteLength(JSON.stringify(v));
 
@@ -11,6 +12,11 @@ export function genId(generation) {
   const id = String(generation ?? '').replace(/[^A-Za-z0-9]/g, '');
   if (!id) throw new Error('snapshot generation is empty');
   return `g${id}`;
+}
+
+/** true when `item` fits alone in a part of `generation` (the largest item toDocs accepts). */
+export function fitsInPart(item, generation, maxBytes = MAX_BYTES) {
+  return bytes({ generation, items: [] }) + bytes(item) <= maxBytes;
 }
 
 // Part ids are per generation (snapshot/<kind>-<genId>-<n>): a new sync never overwrites a part the stored
@@ -28,7 +34,7 @@ function chunkArray(name, items, generation, maxBytes) {
   };
   for (const item of items) {
     const b = bytes(item);
-    if (overhead + b > maxBytes) {
+    if (!fitsInPart(item, generation, maxBytes)) {
       throw new Error(`snapshot/${name}: a single item is ${overhead + b} bytes, over maxBytes (${maxBytes})`);
     }
     const add = b + (cur.length ? 1 : 0);
@@ -40,7 +46,7 @@ function chunkArray(name, items, generation, maxBytes) {
   return docs;
 }
 
-export function toDocs(snapshot, maxBytes = 60000) {
+export function toDocs(snapshot, maxBytes = MAX_BYTES) {
   const parts = [];
   for (const name of ARRAYS) parts.push(...chunkArray(name, snapshot[name] ?? [], snapshot.generation, maxBytes));
   const meta = {};

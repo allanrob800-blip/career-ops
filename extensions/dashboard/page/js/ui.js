@@ -171,6 +171,70 @@
   }
   function closeDialog() { if (current) current.close(); }
 
+  // ---- PDF downloads (platform `downloads` capability; null where the host cannot save files) ----
+  let dlReady = null; // Promise<namespace|null>, asked once
+  let dlNs; // undefined until known, then the namespace or null
+  function downloads() {
+    if (!dlReady) {
+      dlReady = (async () => {
+        let ns = null;
+        try { ns = globalThis.claude ? await globalThis.claude.use('downloads') : null; } catch { ns = null; }
+        dlNs = ns && typeof ns.save === 'function' ? ns : null;
+        return dlNs;
+      })();
+    }
+    return dlReady;
+  }
+  const canDownload = () => (dlNs === undefined ? null : !!dlNs); // null while unknown
+  const DL_MSG = {
+    declined: 'Téléchargement annulé.',
+    unavailable: 'Téléchargement impossible ici : ouvrez le tableau de bord dans un navigateur.',
+    busy: 'Un téléchargement est déjà en cours.',
+    error: 'Téléchargement impossible.',
+  };
+  const DL_UNAVAILABLE = new Set(['host_unavailable', 'unavailable', 'not_granted']);
+  // [A-Za-z0-9-] only (accents stripped, other runs become one hyphen), at most `max` characters; '' when nothing is left.
+  function safeSlug(s, max) {
+    const plain = String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return plain.replace(/[^A-Za-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-/, '').slice(0, max).replace(/-$/, '');
+  }
+  // « CV-Acme.pdf »: the prefix, then the company reduced to [A-Za-z0-9-] (at most 60 characters).
+  const pdfName = (prefix, company) => `${prefix}-${safeSlug(company, 60) || 'candidature'}.pdf`;
+  const safePdf = (name) => `${safeSlug(String(name ?? '').replace(/\.pdf$/i, ''), 100) || 'document'}.pdf`;
+  let dlBusy = false;
+  // Saves the PDF served at `url` (exactly /_blob/<id>) as `filename` (safe characters only, ends in .pdf), and says
+  // what happened in a notice. 'unavailable': this host cannot save files (the caller hides its download buttons).
+  async function downloadAsset(url, filename) {
+    const href = blobHref(url);
+    const ns = await downloads();
+    if (!ns) { toast(DL_MSG.unavailable, 'error'); return 'unavailable'; }
+    if (!href) { toast(DL_MSG.error, 'error'); return 'error'; }
+    if (dlBusy) { toast(DL_MSG.busy); return 'error'; }
+    dlBusy = true;
+    try {
+      let data;
+      try {
+        const res = await fetch(href);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        data = await res.blob();
+      } catch { toast(DL_MSG.error, 'error'); return 'error'; }
+      try {
+        await ns.save({ filename: safePdf(filename), data });
+        return 'saved';
+      } catch (e) {
+        const code = e && typeof e.code === 'string' ? e.code : '';
+        if (code === 'declined') { toast(DL_MSG.declined); return 'declined'; }
+        if (DL_UNAVAILABLE.has(code) || code.startsWith('capability_')) {
+          dlNs = null; dlReady = Promise.resolve(null);
+          toast(DL_MSG.unavailable, 'error');
+          return 'unavailable';
+        }
+        toast(code === 'rate_limited' ? DL_MSG.busy : DL_MSG.error, 'error');
+        return 'error';
+      }
+    } finally { dlBusy = false; }
+  }
+
   // ---- loading / empty / unavailable gate ----
   const UNAVAILABLE = ['Données indisponibles pour l\'instant', 'La base de la page ne répond pas. Réessayez dans un moment : vos données ne sont pas perdues.'];
   const INCOMPLETE = 'Synchronisation incomplète — les données seront rétablies à la prochaine session';
@@ -240,6 +304,8 @@
     chart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 19.5V10M10.5 19.5V5M16.5 19.5v-7M21 19.5H3"/></svg>',
     sliders: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>',
     check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
+    download: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></svg>',
+    copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg>',
     gap: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v6M12 16.5v.5"/><circle cx="12" cy="12" r="8.5"/></svg>',
   };
 
@@ -252,6 +318,6 @@
     esc, safeHref, blobHref, hostOf, fold, countUp, toast, dialog, closeDialog, trapTab, gate, rebuild, reduced, emptyBlock, outlookNote, incompleteNote, INCOMPLETE,
     STATUSES, statusLabel, tone, isSent, figures, SENT, REPLIED, INTERVIEWED, OFFERED, CLOSED,
     today, parisHour, isoDay, addDays, daysBetween, week, fmtDay, fmtLong, fmtWeekday, fmtStamp, fmtNum, fmtPct, plural,
-    ICON, cleanBullet, intent,
+    ICON, cleanBullet, intent, downloads, canDownload, downloadAsset, pdfName,
   };
 })();

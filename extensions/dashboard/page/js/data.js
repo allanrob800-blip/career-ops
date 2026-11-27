@@ -52,14 +52,15 @@
   function assemble() {
     const meta = snapDocs && snapDocs.get('meta');
     if (!isObj(meta) || !Array.isArray(meta.parts) || meta.generation == null) return null;
-    const out = { apps: [], offers: [], reports: [] };
+    const out = { apps: [], offers: [], reports: [], proposals: [] };
     for (const path of meta.parts) {
       if (typeof path !== 'string') return null;
       const id = path.split('/')[1];
-      const part = id && snapDocs.get(id);
+      const kind = id ? id.split('-')[0] : ''; // <kind>-<genId>-<n> (or the older <kind>-<n>)
+      // a kind this page does not know (written by a newer export) is skipped, never a blank page
+      if (!Object.hasOwn(out, kind)) continue;
+      const part = snapDocs.get(id);
       if (!isObj(part) || part.generation !== meta.generation || !Array.isArray(part.items)) return null;
-      const kind = id.split('-')[0]; // <kind>-<genId>-<n> (or the older <kind>-<n>)
-      if (!(kind in out)) return null;
       out[kind] = out[kind].concat(part.items);
     }
     const { parts, ...rest } = meta;
@@ -242,18 +243,37 @@
     }));
   }
 
+  // Text typed in a request field, as one line: a Return (any whitespace run) is one space, edges trimmed, 1 to 500
+  // characters, no control character. Throws with `what` (« Note », « Texte ») in the message.
+  function oneLine(raw, what) {
+    if (typeof raw !== 'string') throw new Error(`${what} vide`);
+    const t = raw.replace(/\s+/g, ' ').trim();
+    if (!t) throw new Error(`${what} vide`);
+    if (t.length > 500) throw new Error(`${what} trop longue (500 caractères maximum)`);
+    if (CONTROL.test(t)) throw new Error(`${what} : caractères de contrôle interdits`);
+    return t;
+  }
+
   function requestNote(ref, raw) {
     let note;
     try {
       checkRef(ref);
-      if (typeof raw !== 'string') throw new Error('Note vide');
-      note = raw.replace(/\s+/g, ' ').trim(); // a Return in the field is a space in the tracker's one-line cell
-      if (!note) throw new Error('Note vide');
-      if (note.length > 500) throw new Error('Note trop longue (500 caractères maximum)');
-      if (CONTROL.test(note)) throw new Error('Note : caractères de contrôle interdits');
+      note = oneLine(raw, 'Note'); // a Return in the field is a space in the tracker's one-line cell
     } catch (e) { return Promise.reject(e); }
     return getDb().then((d) => writeRequest(d, { type: 'note', ref, note, created_at: new Date().toISOString(), state: 'pending' }));
   }
+
+  // why (« Pourquoi cette entreprise ? ») and retouche texts go to the dossier store, which refuses a line break.
+  function requestText(type, ref, raw) {
+    let text;
+    try {
+      checkRef(ref);
+      text = oneLine(raw, 'Réponse');
+    } catch (e) { return Promise.reject(e); }
+    return getDb().then((d) => writeRequest(d, { type, ref, text, created_at: new Date().toISOString(), state: 'pending' }));
+  }
+  const requestWhy = (ref, raw) => requestText('why', ref, raw);
+  const requestRetouche = (ref, raw) => requestText('retouche', ref, raw);
 
   function savePrefs(partial) {
     try {
@@ -317,5 +337,5 @@
     onChange = null;
   }
 
-  globalThis.CapData = { start, stop, getState: currentState, requestStatus, requestNote, expectedStatus, savePrefs, markHandled, handledIds, encodeSeg, STATUSES };
+  globalThis.CapData = { start, stop, getState: currentState, requestStatus, requestNote, requestWhy, requestRetouche, expectedStatus, savePrefs, markHandled, handledIds, encodeSeg, STATUSES };
 })();

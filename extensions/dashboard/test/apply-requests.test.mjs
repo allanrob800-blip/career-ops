@@ -192,7 +192,11 @@ test('a request made just now is not "in the future" for set-status, whatever TZ
 });
 
 // ---- contract: the exact body the page writes is accepted ----
-async function pageBodies() {
+// `calls(CapData)` makes the requests; returns every body the page wrote, in order.
+async function pageBodies(calls = async (CapData) => {
+  await CapData.requestStatus(3, 'Interview');
+  await CapData.requestNote(3, 'Relancer\nvendredi');
+}) {
   const written = [];
   const store = {
     'snapshot/meta': { schema: 1, generation: 'g', generated_at: '2026-11-26T10:00:00Z', companies: [], parts: ['snapshot/apps-g-0'] },
@@ -211,8 +215,7 @@ async function pageBodies() {
   const CapData = ctx.CapData;
   CapData.start(() => {});
   await new Promise((r) => setTimeout(r, 20));
-  await CapData.requestStatus(3, 'Interview');
-  await CapData.requestNote(3, 'Relancer\nvendredi');
+  await calls(CapData);
   CapData.stop();
   return written;
 }
@@ -342,18 +345,21 @@ test('an unreadable dossiers.json rejects the why / retouche requests and is lef
   assert.equal(readFileSync(dossiersFile(), 'utf8'), '{ not json');
 });
 
-// Contract with the page: the object CapData.requestWhy / requestRetouche will write (plan, task 5):
-// {type, ref, text, created_at, state: 'pending'}, read back through db_query.
-test('contract: the why / retouche bodies the page writes are accepted by apply-requests', () => {
-  const created_at = new Date().toISOString();
-  const bodies = [
-    { id: 'p-why', data: { type: 'why', ref: 1, text: 'Leur produit sert les équipes terrain.', created_at, state: 'pending' } },
-    { id: 'p-ret', data: { type: 'retouche', ref: 1, text: 'Ajouter un chiffre clé.', created_at, state: 'pending' } },
-  ];
-  const res = run(lines(bodies));
-  assert.deepEqual(res.results.map((r) => [r.id, r.state]), [['p-ret', 'applied'], ['p-why', 'applied']], JSON.stringify(res.results));
-  assert.deepEqual(res.ops.map((o) => [o.path, o.ifVersion]), [['requests/p-ret', 8], ['requests/p-why', 7]]);
+// Contract with the page: the exact objects CapData.requestWhy / requestRetouche write ({type, ref, text, created_at,
+// state: 'pending'}, the text typed with line breaks), read back through db_query.
+test('contract: the why / retouche bodies CapData.requestWhy / requestRetouche write are accepted by apply-requests', async () => {
+  const written = await pageBodies(async (CapData) => {
+    await CapData.requestWhy(1, 'Leur produit\nsert les équipes terrain.');
+    await new Promise((r) => setTimeout(r, 5)); // distinct created_at: the run applies requests in created_at order
+    await CapData.requestRetouche(1, '  Ajouter un chiffre\r\nclé.  ');
+  });
+  assert.deepEqual(written.map((w) => [w.body.type, w.body.text]), [['why', 'Leur produit sert les équipes terrain.'], ['retouche', 'Ajouter un chiffre clé.']]);
+  assert.deepEqual(Object.keys(written[0].body).sort(), ['created_at', 'ref', 'state', 'text', 'type']);
+  const res = run(lines(written.map((w) => ({ id: w.id, data: w.body }))));
+  assert.deepEqual(res.results.map((r) => [r.id, r.state]), written.map((w) => [w.id, 'applied']), JSON.stringify(res.results));
+  assert.deepEqual(res.ops.map((o) => [o.path, o.ifVersion]), [[`requests/${written[0].id}`, 7], [`requests/${written[1].id}`, 8]]);
   const d = readStore().dossiers['1'];
   assert.equal(d.letter.why, 'Leur produit sert les équipes terrain.');
   assert.equal(d.retouches.at(-1).text, 'Ajouter un chiffre clé.');
+  assert.equal(d.state, 'a_refaire');
 });

@@ -11,7 +11,7 @@
  *                                                    every field is read at call time, so tests may change it live)
  * Calls:  window.__calls = [{ns, fn, args}] — every fake API call, in order.
  * API:
- *   claude.use(name) -> Promise<namespace|null>   ('db' | 'mcp' | 'user'; mcp is null when mode==='null'; unknown -> null)
+ *   claude.use(name) -> Promise<namespace|null>   ('db' | 'mcp' | 'user' | 'downloads'; mcp is null when mode==='null'; unknown -> null)
  *   db (frozen): doc(path) / collection(path) THROW TypeError on a bad path (document = even segment count,
  *        collection = odd; segment chars [A-Za-z0-9_-.~:@+], not '.'/'..', <=200 bytes; <=16 segments, <=1000 bytes).
  *   DocumentReference {id, path, get(), set(data), update(data), delete(), onSnapshot(next, error?), collection(sub)}
@@ -43,6 +43,11 @@
  *   window.__mcpRefetch(only?) (test control, not part of the API) -> re-delivers to every live watch, as a poll
  *        would; `only(tool, input)` limits it to the watches it returns true for.
  *   user: id() -> Promise<'u1'>, can(cap) -> true, canEdit() -> true, isOwner() -> true
+ *   downloads (`claude.use('downloads')`; window.__fake.downloads = {mode: 'null'|'ok'|'error', code, status}):
+ *        mode 'null' (the default: the capability is not declared yet) -> use() resolves null.
+ *        save({filename, data}) -> Promise<{status}> (fake.downloads.status, default 'saved'); in mode 'error' it
+ *        REJECTS {code, message} with fake.downloads.code (default 'bad_request'). Every call is recorded in
+ *        window.__downloads as {filename, blob: data instanceof Blob, type, size} (and in __calls).
  */
 (() => {
   const fake = (window.__fake = window.__fake || {});
@@ -252,6 +257,21 @@
     },
   });
   window.__mcpRefetch = (only) => { for (const w of [...watches.values()]) if (!only || only(w.tool, w.input)) w.deliver(); };
+  // ---- downloads ----
+  window.__downloads = [];
+  const dlCfg = () => (fake.downloads = fake.downloads || {});
+  const downloads = Object.freeze({
+    async save(opts) {
+      const o = isPlain(opts) ? opts : {};
+      const data = o.data;
+      const entry = { filename: o.filename, blob: typeof Blob !== 'undefined' && data instanceof Blob, type: data && data.type, size: data && data.size };
+      window.__downloads.push(entry);
+      rec('downloads', 'save', [entry]);
+      const c = dlCfg();
+      if (c.mode === 'error') return fail(c.code || 'bad_request', `fake ${c.code || 'bad_request'}`);
+      return { status: c.status || 'saved' };
+    },
+  });
   const user = Object.freeze({ id: async () => fake.user.id, can: () => true, canEdit: () => true, isOwner: () => true });
 
   window.claude = {
@@ -260,6 +280,7 @@
       if (name === 'db') return db;
       if (name === 'user') return user;
       if (name === 'mcp') return mcpCfg().mode === 'null' ? null : mcp;
+      if (name === 'downloads') return (dlCfg().mode || 'null') === 'null' ? null : downloads;
       return null;
     },
   };

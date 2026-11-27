@@ -21,8 +21,8 @@ before(async () => { DOCS = fixtureDocs(); server = await startServer(); browser
 after(async () => { await browser?.close(); await server?.close(); });
 
 async function open(opts = {}) {
-  const { docs = DOCS, mcp = {}, ...rest } = opts;
-  const fake = { db: { docs: structuredClone(docs) }, mcp: { mode: 'ok', emails: EMAILS, events: EVENTS, ...mcp } };
+  const { docs = DOCS, mcp = {}, downloads, ...rest } = opts;
+  const fake = { db: { docs: structuredClone(docs) }, mcp: { mode: 'ok', emails: EMAILS, events: EVENTS, ...mcp }, ...(downloads ? { downloads } : {}) };
   const p = await openPage(browser, { url: server.url, now: NOW, fake, ...rest });
   p.page.setDefaultTimeout(5000);
   p.dialogs = [];
@@ -368,7 +368,13 @@ function tinyPng(w = 124, h = 175) {
 }
 const PNG = tinyPng();
 
-// Serves /_blob/<id> as the platform would for an uploaded PNG; ids in `missing` answer 404.
+// A minimal PDF body for the /_blob/ PDFs (the CV and the letter a download fetches).
+const PDF = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
+const CV_URL = '/_blob/0123456789abcdef0123456789abcdef'; // fixture app 1's cv_url
+const LETTER_URL = '/_blob/0123456789abcdef0123456789abcd10';
+const LETTER_PAGES = ['/_blob/0123456789abcdef0123456789abcd11'];
+
+// Serves /_blob/<id> as the platform would for an uploaded PNG (the PDFs above as PDF); ids in `missing` answer 404.
 async function openCv(opts = {}) {
   const { missing = [], ...rest } = opts;
   const p = await open(rest);
@@ -377,6 +383,7 @@ async function openCv(opts = {}) {
     const path = new URL(route.request().url()).pathname;
     p.blobs.push(path);
     if (missing.includes(path)) return route.fulfill({ status: 404, body: 'not found' });
+    if (path === CV_URL || path === LETTER_URL) return route.fulfill({ status: 200, contentType: 'application/pdf', body: PDF });
     return route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
   });
   return p;
@@ -579,3 +586,268 @@ test('CV viewer: a page that fails to load is replaced by a French message, no b
     assert.deepEqual(realErrors(p), []);
   } finally { await p.close(); }
 });
+
+// ---- Task 5: the « Espace CV » of a prepared dossier (apps[i].dossier) ----
+const HOSTILE = '<img src=x onerror=alert(1)>';
+const dossierOf = (num) => Object.entries(DOCS).filter(([k]) => k.startsWith('snapshot/apps-')).flatMap(([, v]) => v.items).find((a) => a.num === num).dossier;
+// app 1's dossier (strategy, message, letter to complete) with a letter ready to view and download, plus `patch`
+const withDossier = (num, patch = {}, appPatch = {}) => withApp(num, { ...appPatch, dossier: { ...(dossierOf(num) || dossierOf(1)), letter_url: LETTER_URL, letter_pages: LETTER_PAGES, ...patch } });
+// navigator.clipboard stand-in: records the text; rejects while window.__clipFail is true
+function clipboardStub() {
+  window.__copied = [];
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => { if (window.__clipFail) throw new DOMException('denied', 'NotAllowedError'); window.__copied.push(t); } } });
+}
+const requests = (p) => p.page.evaluate(() => Object.entries(window.__fake.db.docs).filter(([k]) => k.startsWith('requests/')).map(([, v]) => v));
+const toastText = (p, re) => p.page.waitForFunction((src) => [...document.querySelectorAll('#toasts .toast')].some((t) => new RegExp(src).test(t.textContent)), re.source);
+const sectionOrder = () => {
+  const keys = { '.strat': 'strategie', '.cv-open': 'voir-cv', '.letter-open': 'voir-lettre', '[data-dl=cv]': 'dl-cv', '[data-dl=letter]': 'dl-lettre',
+    '.msg-copy': 'copier', '#form-why': 'pourquoi', '#form-retouche': 'retouche', '#refuse-btn': 'refuser' };
+  const sec = document.querySelector('.cv-space');
+  return [...sec.querySelectorAll(Object.keys(keys).join(', '))].map((n) => keys[Object.keys(keys).find((k) => n.matches(k))]);
+};
+
+test('Espace CV: strategy, viewers, downloads, message, why, retouche, refusal, in this order; absent without a dossier', async () => {
+  const p = await openCv({ docs: withDossier(1), downloads: { mode: 'ok' }, init: clipboardStub });
+  try {
+    let dlg = await openSheet(p, 3);
+    assert.equal(await dlg.locator('.cv-space').count(), 0, 'no dossier, no Espace CV');
+    await p.page.keyboard.press('Escape');
+    dlg = await openSheet(p, 1);
+    const sec = dlg.locator('.cv-space');
+    assert.equal((await sec.locator('h3').innerText()).trim(), 'Espace CV');
+    await sec.locator('[data-dl=cv]').waitFor();
+    assert.deepEqual(await p.page.evaluate(sectionOrder), ['strategie', 'voir-cv', 'voir-lettre', 'dl-cv', 'dl-lettre', 'copier', 'pourquoi', 'retouche', 'refuser']);
+    // the strategy card: title, angle, proof with its source, kept keywords, dropped keywords with the reason, gaps
+    const strat = await sec.locator('.strat').innerText();
+    for (const t of ['Product Manager', 'Chef de produit qui relie les besoins des clients', 'Lancement d\'une application interne utilisée par trois équipes',
+      'Source : cv.md › expérience la plus récente', 'roadmap', 'discovery', 'SAFe', 'absent de cv.md', 'Anglais courant', 'non revendiqué, niveau indiqué tel quel']) assert.ok(strat.includes(t), t);
+    assert.deepEqual(await sec.locator('.kw .chip').allInnerTexts(), ['roadmap', 'discovery']);
+    assert.equal((await sec.locator('[data-dl=cv]').innerText()).trim(), 'Télécharger le CV (PDF)');
+    assert.equal((await sec.locator('[data-dl=letter]').innerText()).trim(), 'Télécharger la lettre (PDF)');
+    assert.equal((await sec.locator('.msg-text').innerText()).trim(), 'Bonjour, je vous propose ma candidature au poste de chef de produit.');
+    assert.equal((await sec.locator('label[for=detail-why]').innerText()).trim(), 'Pourquoi cette entreprise ?');
+    assert.equal((await sec.locator('label[for=detail-retouche]').innerText()).trim(), 'Demander une retouche');
+    assert.equal((await sec.locator('#refuse-btn').innerText()).trim(), 'Refuser cette offre');
+    assert.equal((await sec.locator('.dossier-badge').innerText()).trim(), 'Prête');
+    assert.equal(await dlg.locator('.detail-links:not(.cv-viewers) .cv-open').count(), 0, '« Voir le CV » only once, in the Espace CV');
+    assert.equal(await p.page.locator('a[href*="_blob"], a[download], object, embed').count(), 0);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+  // no letter pages, a letter already written: no « Voir la lettre », no « Pourquoi cette entreprise ? »
+  const q = await openCv({ docs: withDossier(1, { letter_pages: [], letter_url: null, letter_state: 'prete', has_why: true }), downloads: { mode: 'ok' } });
+  try {
+    const dlg = await openSheet(q, 1);
+    await dlg.locator('[data-dl=cv]').waitFor();
+    assert.deepEqual(await q.page.evaluate(sectionOrder), ['strategie', 'voir-cv', 'dl-cv', 'copier', 'retouche', 'refuser']);
+  } finally { await q.close(); }
+  // a letter to complete but the why already given: no question either
+  const r = await openCv({ docs: withDossier(1, { has_why: true }) });
+  try {
+    const dlg = await openSheet(r, 1);
+    assert.equal(await dlg.locator('#form-why').count(), 0);
+    assert.equal(await dlg.locator('.dl-btn').count(), 0, 'downloads unavailable (use(\'downloads\') is null): no download button');
+  } finally { await r.close(); }
+});
+
+test('Espace CV: hostile dossier values render as text, never as markup', async () => {
+  const strategy = { titre_cv: HOSTILE, angle: HOSTILE, lettre_angle: null, preuves: [{ texte: HOSTILE, source: HOSTILE }], mots_cles_repris: [HOSTILE],
+    mots_cles_ecartes: [{ mot: HOSTILE, raison: HOSTILE }], ecarts: [{ exigence: HOSTILE, traitement: HOSTILE }] };
+  const docs = withDossier(1, { state: 'a_verifier', strategy, message: HOSTILE, check_reasons: [HOSTILE], letter_url: 'javascript:alert(1)', letter_pages: ['javascript:alert(1)', 'https://evil.example/p.png'] });
+  const p = await openCv({ docs, downloads: { mode: 'ok' } });
+  try {
+    await go(p, 'candidatures');
+    assert.equal((await p.page.locator('#app-list [data-num="1"] .dossier-badge').innerText()).trim(), 'À vérifier');
+    const dlg = await openSheet(p, 1);
+    await dlg.locator('[data-dl=cv]').waitFor();
+    assert.equal(await p.page.locator('img').count(), 0);
+    assert.equal(await dlg.locator('.letter-open, [data-dl=letter]').count(), 0, 'a hostile letter url/pages are dropped');
+    assert.ok((await dlg.locator('.cv-space').innerText()).split(HOSTILE).length >= 10);
+    assert.equal(await p.page.locator('a[href^="javascript"], [src*="evil"]').count(), 0);
+    await p.page.waitForTimeout(100);
+    assert.deepEqual(p.dialogs, []);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Espace CV: the why answer becomes a why request (one line); the retouche a retouche request', async () => {
+  const p = await openCv({ docs: withDossier(1) });
+  try {
+    const dlg = await openSheet(p, 1);
+    await dlg.locator('#detail-why').fill('Leur produit');
+    await dlg.locator('#detail-why').press('Enter');
+    await dlg.locator('#detail-why').pressSequentially('sert les équipes terrain.');
+    await dlg.locator('#why-send').click();
+    await p.page.waitForFunction(() => Object.values(window.__fake.db.docs).some((v) => v.type === 'why' && v.ref === 1 && v.text === 'Leur produit sert les équipes terrain.' && v.state === 'pending'));
+    await dlg.locator('#form-why .req-done').waitFor();
+    assert.equal((await dlg.locator('#form-why').innerText()).trim(), 'Envoyé. Claude écrira la lettre à la prochaine session.');
+    assert.equal(await dlg.locator('#detail-why').count(), 0);
+    // an empty retouche is refused in the form, nothing is written
+    await dlg.locator('#retouche-send').click();
+    await dlg.locator('#err-retouche').waitFor();
+    assert.match(await dlg.locator('#err-retouche').innerText(), /vide/);
+    await dlg.locator('#detail-retouche').fill('Mettre la roadmap\nen avant');
+    await dlg.locator('#retouche-send').click();
+    await p.page.waitForFunction(() => Object.values(window.__fake.db.docs).some((v) => v.type === 'retouche' && v.ref === 1 && v.text === 'Mettre la roadmap en avant'));
+    await dlg.locator('#form-retouche .req-done').waitFor();
+    assert.equal((await dlg.locator('#form-retouche').innerText()).trim(), 'Envoyé. Claude fera la retouche à la prochaine session.');
+    assert.deepEqual((await requests(p)).map((r) => r.type).sort(), ['retouche', 'why']);
+    // the pending badge names them; reopening the sheet does not ask « Pourquoi » again while the answer is pending
+    await p.page.waitForFunction(() => /pourquoi cette entreprise/.test(document.querySelector('#detail-pending')?.textContent || ''));
+    await p.page.keyboard.press('Escape');
+    const again = await openSheet(p, 1);
+    assert.equal(await again.locator('#form-why').count(), 0);
+    assert.match(await again.locator('.cv-space').innerText(), /Envoyé\. Claude écrira la lettre/);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Espace CV: « Refuser cette offre » asks for confirmation in the sheet, then a status request to Discarded', async () => {
+  const p = await openCv({ docs: withDossier(1) });
+  try {
+    const dlg = await openSheet(p, 1);
+    await dlg.locator('#refuse-btn').click();
+    assert.equal(await p.page.locator('.dlg').count(), 1, 'no second dialog');
+    assert.equal(await dlg.locator('#refuse-btn').isVisible(), false);
+    assert.equal((await dlg.locator('#refuse-confirm').innerText()).trim(), 'Confirmer le refus');
+    assert.equal((await dlg.locator('#refuse-cancel').innerText()).trim(), 'Annuler');
+    assert.deepEqual(await requests(p), [], 'nothing written before the confirmation');
+    await dlg.locator('#refuse-cancel').click();
+    assert.equal(await dlg.locator('#refuse-btn').isVisible(), true);
+    assert.equal(await dlg.locator('#refuse-confirm').isVisible(), false);
+    assert.equal(await p.page.evaluate(() => document.activeElement?.id), 'refuse-btn');
+    await dlg.locator('#refuse-btn').click();
+    await dlg.locator('#refuse-confirm').click();
+    await p.page.waitForFunction(() => Object.values(window.__fake.db.docs).some((v) => v.type === 'status' && v.ref === 1 && v.from_status === 'Evaluated' && v.to_status === 'Discarded' && v.state === 'pending'));
+    await dlg.locator('#refuse .req-done').waitFor();
+    assert.equal((await requests(p)).length, 1);
+    assert.deepEqual(p.dialogs, []);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Espace CV: downloads save a Blob as CV-<Entreprise>.pdf; declined says so; unavailable hides the buttons', async () => {
+  const p = await openCv({ docs: withDossier(1), downloads: { mode: 'ok' } });
+  try {
+    const dlg = await openSheet(p, 1);
+    await dlg.locator('[data-dl=cv]').click();
+    await p.page.waitForFunction(() => window.__downloads.length === 1);
+    await dlg.locator('[data-dl=letter]').click();
+    await p.page.waitForFunction(() => window.__downloads.length === 2);
+    const saved = await p.page.evaluate(() => window.__downloads);
+    assert.deepEqual(saved.map((d) => [d.filename, d.blob, d.type, d.size]), [['CV-Acme.pdf', true, 'application/pdf', PDF.length], ['Lettre-Acme.pdf', true, 'application/pdf', PDF.length]]);
+    assert.ok(p.blobs.includes(CV_URL) && p.blobs.includes(LETTER_URL));
+    // the file name keeps only safe characters: accents stripped, other runs one hyphen, company at most 60 characters
+    const names = await p.page.evaluate(() => [CapUI.pdfName('CV', 'Société Générale & Cie'), CapUI.pdfName('Lettre', '<img src=x onerror=alert(1)>'), CapUI.pdfName('CV', '***'), CapUI.pdfName('CV', 'A'.repeat(80))]);
+    assert.deepEqual(names, ['CV-Societe-Generale-Cie.pdf', 'Lettre-img-src-x-onerror-alert-1.pdf', 'CV-candidature.pdf', `CV-${'A'.repeat(60)}.pdf`]);
+    assert.equal(await p.page.evaluate(async () => { await CapUI.downloadAsset('/_blob/0123456789abcdef0123456789abcdef', '../x/é.exe'); return window.__downloads.at(-1).filename; }), 'x-e-exe.pdf');
+    assert.equal(await p.page.evaluate(() => CapUI.downloadAsset('https://evil.example/x.pdf', 'x.pdf')), 'error');
+    assert.equal(await p.page.evaluate(() => window.__downloads.length), 3, 'a url other than /_blob/<id> is never fetched nor saved');
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+  for (const [code, msg, kept] of [['declined', /^Téléchargement annulé\.$/, true], ['rate_limited', /^Un téléchargement est déjà en cours\.$/, true],
+    ['too_large', /^Téléchargement impossible\.$/, true], ['host_unavailable', /^Téléchargement impossible ici : ouvrez le tableau de bord dans un navigateur\.$/, false],
+    ['capability_disabled', /navigateur/, false]]) {
+    const q = await openCv({ docs: withDossier(1), downloads: { mode: 'error', code } });
+    try {
+      const dlg = await openSheet(q, 1);
+      await dlg.locator('[data-dl=cv]').click();
+      await toastText(q, msg);
+      if (kept) assert.equal(await dlg.locator('[data-dl=cv]').isVisible(), true, code);
+      else await q.page.waitForFunction(() => document.querySelectorAll('.dl-btn').length === 0);
+      assert.deepEqual(q.errors, [], code);
+    } finally { await q.close(); }
+  }
+  const r = await openCv({ docs: withDossier(1) }); // use('downloads') -> null
+  try {
+    const dlg = await openSheet(r, 1);
+    await dlg.locator('.msg-copy').waitFor();
+    await r.page.waitForTimeout(50);
+    assert.equal(await dlg.locator('.dl-btn, .cv-downloads').count(), 0);
+    assert.equal(await r.page.evaluate(() => CapUI.downloadAsset('/_blob/0123456789abcdef0123456789abcdef', 'CV-Acme.pdf')), 'unavailable');
+  } finally { await r.close(); }
+});
+
+test('Espace CV: « Copier » writes the message to the clipboard; a refusal asks to select the text', async () => {
+  const p = await openCv({ docs: withDossier(1), init: clipboardStub });
+  try {
+    const dlg = await openSheet(p, 1);
+    await dlg.locator('.msg-copy').click();
+    await p.page.waitForFunction(() => window.__copied.length === 1);
+    assert.deepEqual(await p.page.evaluate(() => window.__copied), ['Bonjour, je vous propose ma candidature au poste de chef de produit.']);
+    assert.equal(await dlg.locator('#err-copy').isVisible(), false);
+    await p.page.evaluate(() => { window.__clipFail = true; });
+    await dlg.locator('.msg-copy').click();
+    await dlg.locator('#err-copy').waitFor();
+    assert.equal((await dlg.locator('#err-copy').innerText()).trim(), 'Copie impossible : sélectionnez le texte.');
+    assert.equal(await p.page.evaluate(() => getSelection().toString()), 'Bonjour, je vous propose ma candidature au poste de chef de produit.');
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Candidatures: a dossier badge « Prête », « À vérifier » or « Retouche demandée » in the table and the columns', async () => {
+  const docs = withApp(3, { dossier: { ...dossierOf(1), state: 'a_refaire', retouche_pending: true } });
+  const p = await open({ docs });
+  try {
+    await go(p, 'candidatures');
+    const badge = (n) => p.page.locator(`#app-list [data-num="${n}"] .dossier-badge`).innerText();
+    assert.equal((await badge(1)).trim(), 'Prête');
+    assert.equal((await badge(6)).trim(), 'À vérifier');
+    assert.equal((await badge(3)).trim(), 'Retouche demandée');
+    assert.equal(await p.page.locator('#app-list .dossier-badge').count(), 3);
+    await p.page.locator('[data-layout=columns]').click();
+    assert.equal(await p.page.locator('.kanban .dossier-badge').count(), 3);
+    // the strategy-less dossier (6) shows its check reasons, no strategy card
+    await p.page.locator('[data-layout=table]').click();
+    const dlg = await openSheet(p, 6);
+    assert.equal(await dlg.locator('.strat').count(), 0);
+    assert.match(await dlg.locator('.check-reasons').innerText(), /mot-clé absent : roadmap/);
+  } finally { await p.close(); }
+});
+
+test('Espace CV: « Voir la lettre » opens the letter pages in the sheet; Retour goes back to it', async () => {
+  const p = await openCv({ docs: withDossier(1, { letter_stale: true }), device: { width: 430, height: 932 }, reducedMotion: true });
+  try {
+    const dlg = await openSheet(p, 1);
+    await dlg.locator('.letter-open').click();
+    const view = dlg.locator('.cv-view[data-view=letter]');
+    await view.waitFor();
+    assert.deepEqual(await view.locator('img').evaluateAll((l) => l.map((i) => [i.getAttribute('src'), i.getAttribute('alt')])), [[LETTER_PAGES[0], 'Lettre — page 1 sur 1']]);
+    assert.match(await p.page.locator('.dlg-title').innerText(), /^Lettre — Acme/);
+    assert.match(await view.innerText(), /Cette lettre a été modifiée/);
+    assert.equal(await dlg.locator('.detail-main').isVisible(), false);
+    await p.page.keyboard.press('Escape');
+    assert.equal(await dlg.locator('.detail-main').isVisible(), true);
+    assert.equal(await p.page.evaluate(() => document.activeElement?.classList.contains('letter-open')), true);
+    // then the CV viewer still works, each viewer keeps its own pages
+    await dlg.locator('.cv-open').click();
+    await dlg.locator('.cv-view[data-view=cv]').waitFor();
+    assert.equal(await dlg.locator('.cv-view[data-view=letter]').isVisible(), false);
+    assert.deepEqual(await dlg.locator('.cv-view[data-view=cv] img').evaluateAll((l) => l.map((i) => i.getAttribute('src'))), PAGES);
+    await dlg.locator('.cv-view[data-view=cv] .cv-back').click();
+    assert.equal(await p.page.evaluate(() => document.activeElement?.classList.contains('cv-open')), true);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+for (const width of [360, 430]) {
+  test(`Espace CV at ${width}px: no horizontal overflow, every control at least 44px tall`, async () => {
+    const p = await openCv({ docs: withDossier(1), downloads: { mode: 'ok' }, device: { width, height: 900 }, reducedMotion: true, init: clipboardStub });
+    try {
+      const dlg = await openSheet(p, 1);
+      await dlg.locator('[data-dl=letter]').waitFor();
+      const check = async (label) => {
+        const r = await p.page.evaluate(overflowScan);
+        assert.ok(r.sw <= r.W, `${label}: scrollWidth ${r.sw} > ${r.W}`);
+        assert.deepEqual(r.bad, [], label);
+        assert.equal(await dlg.locator('.dlg-panel').evaluate((e) => e.scrollWidth <= e.clientWidth), true, label);
+        assert.deepEqual(await p.page.evaluate(tooSmall, '.dlg'), [], label);
+      };
+      await check('sheet');
+      await dlg.locator('#refuse-btn').click();
+      await check('refusal confirmation');
+      await dlg.locator('.msg-copy').scrollIntoViewIfNeeded();
+      await p.page.screenshot({ path: join(SHOTS, `cv-space-${width}.png`), fullPage: true });
+      assert.deepEqual(p.errors, []);
+    } finally { await p.close(); }
+  });
+}

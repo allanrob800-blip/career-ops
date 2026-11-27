@@ -329,3 +329,56 @@ test('weekly_goal is kept within 1-10, like the settings screen', async () => {
     assert.deepEqual(r, ['error', 'ok', 'ok']);
   } finally { await p.close(); }
 });
+
+// ---- Task 5: why / retouche requests; proposals and unknown part kinds in the snapshot ----
+test('requestWhy / requestRetouche write {type, ref, text, created_at, state} with the note\'s one-line normalization', async () => {
+  const p = await open(withApps(APPS));
+  try {
+    await settle(p);
+    await p.page.evaluate(() => CapData.requestWhy(3, '  Leur produit\nsert les\r\n\téquipes terrain.  '));
+    await p.page.evaluate(() => CapData.requestRetouche(4, 'Mettre la roadmap\n\nen avant'));
+    const reqs = await p.page.evaluate(async () => (await (await claude.use('db')).collection('requests').get()).docs.map((d) => ({ id: d.id, ...d.data() })));
+    assert.equal(reqs.length, 2);
+    const why = reqs.find((r) => r.type === 'why');
+    const ret = reqs.find((r) => r.type === 'retouche');
+    assert.match(why.id, /^[0-9a-f-]{36}$/);
+    assert.deepEqual(Object.keys(why).sort(), ['created_at', 'id', 'ref', 'state', 'text', 'type']);
+    assert.deepEqual({ ref: why.ref, text: why.text, state: why.state }, { ref: 3, text: 'Leur produit sert les équipes terrain.', state: 'pending' });
+    assert.deepEqual({ ref: ret.ref, text: ret.text, state: ret.state }, { ref: 4, text: 'Mettre la roadmap en avant', state: 'pending' });
+    assert.ok(!Number.isNaN(Date.parse(why.created_at)) && !Number.isNaN(Date.parse(ret.created_at)));
+    await settle(p);
+    assert.deepEqual((await last(p)).pending.map((r) => r.type).sort(), ['retouche', 'why']);
+    const bad = await p.page.evaluate(async () => {
+      const out = [];
+      for (const f of [() => CapData.requestWhy(1, ''), () => CapData.requestWhy(1, ' \n\t '), () => CapData.requestWhy(1, 'x'.repeat(501)),
+        () => CapData.requestRetouche(1, 'a\u0007b'), () => CapData.requestRetouche('2', 'ok'), () => CapData.requestRetouche(0, 'ok'), () => CapData.requestWhy(1, 42)]) {
+        try { await f(); out.push('ok'); } catch (e) { out.push(e instanceof Error ? 'error' : 'other'); }
+      }
+      return out;
+    });
+    assert.deepEqual(bad, Array(7).fill('error'));
+    assert.equal(await p.page.evaluate(async () => (await (await claude.use('db')).collection('requests').get()).size), 2);
+  } finally { await p.close(); }
+});
+
+test('assemble: a proposals part lands in snapshot.proposals (default []); an unknown part kind is ignored', async () => {
+  const docs = gen('g1');
+  docs['snapshot/proposals-g1-0'] = { generation: 'g1', items: [{ id: 'p-0a1b2c3d4e5f6071', ref: 1, to_status: 'Applied' }] };
+  docs['snapshot/zzz-g1-0'] = { generation: 'other', items: 'not an array' };
+  docs['snapshot/meta'].parts.push('snapshot/proposals-g1-0', 'snapshot/zzz-g1-0', 'snapshot/yyy-g1-0'); // yyy is listed but absent
+  const p = await open(docs);
+  try {
+    await settle(p);
+    const s = await last(p);
+    assert.equal(s.status, 'ok');
+    assert.deepEqual(s.snapshot.proposals, [{ id: 'p-0a1b2c3d4e5f6071', ref: 1, to_status: 'Applied' }]);
+    assert.equal(s.snapshot.apps.length, 1);
+    assert.ok(!('zzz' in s.snapshot) && !('yyy' in s.snapshot));
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+  const q = await open(gen('g2'));
+  try {
+    await settle(q);
+    assert.deepEqual((await last(q)).snapshot.proposals, []);
+  } finally { await q.close(); }
+});

@@ -417,6 +417,29 @@ table.apps { width: 100%; border-collapse: collapse; }
   .dlg.is-cv .dlg-panel { height: 100vh; height: 100dvh; max-height: none; border-radius: 0; padding-inline: 10px; }
 }
 .cv-mark { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: .72rem; font-weight: 700; letter-spacing: .02em; vertical-align: middle; background: var(--track); color: var(--muted); }
+/* Espace CV (a prepared dossier, inside the detail sheet) */
+.cv-space { margin-top: 18px; padding-top: 4px; border-top: 1px solid var(--line); min-width: 0; }
+.cv-space-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 18px 0 8px; }
+.cv-space-head .sub-title { margin: 0; }
+.cv-space .btn { white-space: normal; text-align: center; max-width: 100%; }
+.badge-good { background: color-mix(in srgb, var(--good) 15%, transparent); color: var(--good); }
+.dossier-badge { margin-left: 8px; vertical-align: middle; justify-self: start; width: max-content; max-width: 100%; }
+.stack td.cell-co .dossier-badge { margin-left: 0; }
+.cv-space-head .dossier-badge { margin-left: 0; }
+.check-reasons { color: var(--warn); padding-left: 1.2em; list-style: disc; overflow-wrap: anywhere; }
+.strat { display: grid; gap: 6px; padding: 12px 14px; border-radius: 16px; background: var(--track); overflow-wrap: anywhere; min-width: 0; }
+.strat-title { font-weight: 700; }
+.strat-h { font-size: .8rem; font-weight: 700; color: var(--muted); margin: 6px 0 0; }
+.strat-list { display: grid; gap: 4px; padding-left: 1.2em; list-style: disc; }
+.strat-src { display: block; font-size: .8rem; color: var(--muted); }
+.kw { display: flex; flex-wrap: wrap; gap: 6px; }
+.kw .chip { white-space: normal; overflow-wrap: anywhere; }
+.msg-box { display: grid; gap: 8px; margin-top: 16px; min-width: 0; }
+.msg-box .strat-h { margin: 0; }
+.msg-text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--field); user-select: text; }
+.req-done { font-weight: 600; color: var(--good); }
+.refuse { margin-top: 18px; display: grid; gap: 8px; }
+.refuse-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .detail-pending { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .detail-pending:empty { display: none; }
 .req { display: grid; gap: 8px; margin-top: 18px; }

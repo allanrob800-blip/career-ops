@@ -36,11 +36,19 @@ const COMMON = [
 const LETTER_RULE = "Matière autorisée pour la lettre : la réponse du candidat à « Pourquoi cette entreprise ? », son récit dans "
   + "`modes/_profile.md`, la fiche stratégie, et la recherche sur l'entreprise, citée avec sa source. Rien d'autre.";
 
+// AGENTS.md › LinkedIn JD loading guard: the pending form of an unreadable LinkedIn JD.
+const LINKEDIN_PENDING = '`- [!] {URL} — JD unavailable; paste text or provide employer URL`';
+
 const SPECIFIC = {
+  // The Éclaireur reads each posting once and keeps it as a jds/ capture the Évaluateur reuses.
+  eclaireur: ['capture-jd.mjs', 'en faire une capture `jds/`', 'Enregistrer une capture', LINKEDIN_PENDING,
+    'Ta lecture est la seule tentative de navigateur pour cette offre dans tout le passage'],
   candidature: ["S'arrêter avant le bouton d'envoi", 'node apply-scope.mjs launch-options'],
   'expert-cv-lettre': ['check-strategy.mjs', 'deux essais au plus', 'a_verifier', LETTER_RULE],
   suivi: ['reply-watch', 'proposals.json', 'relances.json', 'lecture seule'],
-  evaluateur: ['posting-guard.mjs', 'check-liveness.mjs', 'reserve-report-num.mjs', 'merge-tracker.mjs'],
+  evaluateur: ['posting-guard.mjs', 'check-liveness.mjs', 'reserve-report-num.mjs', 'merge-tracker.mjs',
+    "node capture-jd.mjs --find '<url>'", 'tu réutilises cette capture, sans relire la page',
+    'Ne jamais relire une offre LinkedIn déjà tentée ce passage', LINKEDIN_PENDING],
 };
 
 const EMAIL = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/u;
@@ -91,7 +99,7 @@ test('README: agents table, file contracts, routine, postule, Mac install, updat
     assert.ok(text.includes(heading), `missing section: ${heading}`);
   }
   for (const s of ['.career-ops-data', 'npm install', 'npx playwright install chromium', 'gh auth login',
-    'select-for-prep.mjs', 'check-strategy.mjs', 'render-pages.mjs', 'record-assets.mjs', 'apply-requests.mjs',
+    'Enregistrer une capture', 'findCaptureForUrl', 'select-for-prep.mjs', 'check-strategy.mjs', 'render-pages.mjs', 'record-assets.mjs', 'apply-requests.mjs',
     'export.mjs', 'CAREER_OPS_TRUST_PROXY_EGRESS=1', 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium',
     'update-system.mjs:', 'lib/update-manifest.mjs:']) {
     assert.ok(text.includes(s), `missing: ${s}`);

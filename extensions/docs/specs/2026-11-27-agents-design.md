@@ -24,12 +24,13 @@ Pourquoi : aujourd'hui, chaque étape demande une session interactive. Le candid
 
 1. **Six agents spécialisés**, définis une fois et réutilisés à chaque session (cloud, application de bureau, terminal). Voir 6.1.
 2. **Une routine quotidienne dans le cloud** qui enchaîne les agents sans le candidat. Elle cherche, évalue, prépare, suit, puis met le tableau de bord à jour et notifie l'iPhone quand une action du candidat est attendue.
-3. **Préparation automatique** (choix A du candidat) de toute offre notée **4,0/5 ou plus** qui passe les règles éliminatoires et la vérification de légitimité. Le dossier comprend le CV d'une page, la lettre, le message court au recruteur, les réponses types du formulaire et le résumé de stratégie.
+3. **Préparation automatique** (choix A du candidat) de toute offre notée **4,0/5 ou plus** qui passe les règles éliminatoires et la vérification de légitimité. Le dossier comprend le CV d'une page, le message court au recruteur, les réponses types du formulaire et le résumé de stratégie. La **lettre** attend une seule réponse du candidat, son « pourquoi cette entreprise » (voir 6.9).
 4. **L'espace CV** dans la fiche candidature du tableau de bord, qui contient :
    - le résumé de stratégie ;
    - le CV et la lettre affichés dans la page ;
    - le téléchargement des PDF, par la capacité `downloads` de l'artifact ;
-   - un bouton « Refuser cette offre ».
+   - la question « Pourquoi cette entreprise ? » tant que la lettre n'est pas écrite ;
+   - « Demander une retouche » (texte libre) et « Refuser cette offre ».
 5. **Sur le Mac, une commande « postule ».** L'agent candidature ouvre une à une les candidatures prêtes dans une fenêtre de navigateur visible, remplit tout et s'arrête avant l'envoi. Une fois que le candidat a cliqué, il enregistre `Applied`.
 6. **Le suivi.**
    - L'agent lit Outlook (lecture seule), classe les réponses et **propose** les changements de statut, que le candidat confirme d'un geste dans le tableau de bord.
@@ -221,6 +222,27 @@ Le **chef d'orchestre** n'est pas un agent : c'est la session principale de la r
 - **Données fictives** (« Camille Test ») pour tous les tests. Jamais `export.mjs` ni `apply-requests.mjs` sur la vraie racine de données pendant un test.
 - **Première routine** lancée à la main, devant le candidat, avant de programmer la tâche.
 - **Première « postule »** sur un vrai dossier, devant le candidat.
+
+### 6.9 Décisions issues de la relecture
+
+**Lettre de motivation** *(choix du candidat)* :
+- `modes/cover.md` est interactif et, sans personne, s'arrête sur `needs_confirmation` : la routine ne doit donc pas écrire seule la lettre.
+- La routine prépare tout le reste. Dans la fiche, le tableau de bord pose une seule question : « Pourquoi cette entreprise ? », en une ou deux phrases. La réponse devient une demande dans la base.
+- La lettre est écrite à la routine suivante, ou tout de suite si le candidat lance « postule » sur le Mac (l'agent écrit alors la lettre avant d'ouvrir le formulaire et la montre).
+- Matière autorisée : la réponse du candidat, son récit dans `modes/_profile.md`, la fiche stratégie, et la recherche sur l'entreprise, citée avec sa source. Rien d'autre.
+- Les autres étapes interactives de `cover.md` (confirmation des mots-clés, questions sur les écarts) sont remplacées par la fiche stratégie : les écarts y sont notés « non abordé », jamais comblés par une invention.
+- Le dossier est **« Prêt »** quand le CV, le message et les réponses existent. La lettre est « à compléter » tant que la réponse manque. Pour une annonce qui n'exige pas de lettre, le candidat peut envoyer sans elle.
+
+**Relecture et retouches** *(choix du candidat)* :
+- « Demander une retouche » (texte libre, 500 caractères au plus) crée une demande : l'Expert CV et lettre refait le dossier à la routine suivante, en tenant compte de la remarque, et met à jour la fiche stratégie.
+- « postule » ouvre **tous** les dossiers prêts, sans validation préalable : la relecture finale se fait devant le formulaire rempli.
+
+**Boucle de correction automatique** *(choix de Claude)* :
+- Quand le contrôle de cohérence (6.3) échoue, l'Expert peut corriger son propre CV ou sa fiche pour qu'ils concordent, deux essais au plus.
+- Ce n'est pas la « correction proposée par un relecteur » de `modes/_custom.md`, qui vise les retouches de fond ou de style : il ne s'agit que d'accorder le résumé au document réel, sans ajouter de fait.
+- Après deux échecs, le dossier n'est pas « Prêt » : il apparaît « À vérifier », avec le motif, et la notification le signale.
+
+**Écarts du CV** *(choix de Claude)* : l'étape de `modes/pdf.md` qui demande au candidat comment traiter un écart est remplacée, en routine, par l'enregistrement de l'écart dans la fiche stratégie, sans ajout au CV.
 
 ## 7. Ce qui reste au constructeur
 

@@ -3,7 +3,9 @@
   "url": "https://claude.ai/artifact/00000000-0000-0000-0000-000000000000",
   "published": "2026-11-27",
   "cv_assets": {
-    "1": { "asset_id": "0123456789abcdef0123456789abcdef", "file": "output/cv-fictional-acme.pdf", "sha256": "0000000000000000000000000000000000000000000000000000000000000000" },
-    "8": { "asset_id": "javascript:alert(1)", "file": "output/cv-fictional-hostile.pdf", "sha256": "0000000000000000000000000000000000000000000000000000000000000000" }
+    "1": { "asset_id": "0123456789abcdef0123456789abcdef", "file": "output/cv-fictional-acme.pdf", "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+           "pages": ["0123456789abcdef0123456789abcd01", "0123456789abcdef0123456789abcd02"] },
+    "8": { "asset_id": "javascript:alert(1)", "file": "output/cv-fictional-hostile.pdf", "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+           "pages": ["javascript:alert(1)", "../../x", "https://evil.example/p.png"] }
   }
 }

@@ -403,6 +403,19 @@ table.apps { width: 100%; border-collapse: collapse; }
 .h-day { font-weight: 700; white-space: nowrap; min-width: 4.5em; }
 .detail-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .cv-stale { margin-top: 8px; color: var(--warn); }
+/* CV viewer (inside the detail sheet): page images on white paper; wider panel on PC, full-height sheet on phones */
+.dlg.is-cv .dlg-wrap { max-width: 880px; }
+.cv-view { display: grid; gap: 14px; animation: fade .2s ease-out both; }
+.cv-view .cv-stale { margin-top: 0; }
+.cv-bar { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 4px 0 8px; background: var(--glass-solid); }
+.cv-pages { display: grid; gap: 16px; min-width: 0; }
+.cv-page { margin: 0; min-width: 0; }
+.cv-page img { display: block; width: 100%; max-width: 100%; height: auto; background: #fff; border-radius: 3px; box-shadow: 0 1px 2px rgb(20 10 20 / .14), 0 6px 22px rgb(20 10 20 / .12); }
+.cv-missing { padding: 32px 18px; border: 1px dashed var(--line); border-radius: 10px; text-align: center; color: var(--muted); }
+.cv-note { text-align: center; }
+@media (max-width: 719px) {
+  .dlg.is-cv .dlg-panel { height: 100vh; height: 100dvh; max-height: none; border-radius: 0; padding-inline: 10px; }
+}
 .cv-mark { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: .72rem; font-weight: 700; letter-spacing: .02em; vertical-align: middle; background: var(--track); color: var(--muted); }
 .detail-pending { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .detail-pending:empty { display: none; }

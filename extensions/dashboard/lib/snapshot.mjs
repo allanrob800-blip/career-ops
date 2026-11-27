@@ -56,13 +56,21 @@ export function parseCvAssets(text) {
   return out;
 }
 
-// cv_url only for an asset id the platform could have issued; cv_stale only when export hashed the recorded file
-// (input.cvFileHashes: {file: sha256 hex}): true means the CV was regenerated after its upload.
+const CV_PAGES_MAX = 6;
+
+// cv_url only for an asset id the platform could have issued; cv_pages: the PNG renders of that PDF (entry.pages, in
+// order, same id rule, at most 6), the only form the page can show (the frame refuses PDF links and downloads).
+// cv_stale only when export hashed the recorded file (input.cvFileHashes: {file: sha256 hex}): true means the PDF was
+// regenerated after its upload, so its pages are out of date too.
 function cvFor(entry, hashes) {
-  if (!entry || typeof entry.asset_id !== 'string' || !ASSET_ID.test(entry.asset_id)) return { cv_url: null, cv_stale: null };
+  const url = entry && typeof entry.asset_id === 'string' && ASSET_ID.test(entry.asset_id) ? `/_blob/${entry.asset_id}` : null;
+  const pages = entry && Array.isArray(entry.pages)
+    ? entry.pages.filter((id) => typeof id === 'string' && ASSET_ID.test(id)).slice(0, CV_PAGES_MAX).map((id) => `/_blob/${id}`)
+    : [];
+  if (!url && !pages.length) return { cv_url: null, cv_pages: [], cv_stale: null };
   const cur = typeof entry.file === 'string' && Object.hasOwn(hashes, entry.file) ? hashes[entry.file] : null;
   const rec = typeof entry.sha256 === 'string' ? entry.sha256.toLowerCase() : null;
-  return { cv_url: `/_blob/${entry.asset_id}`, cv_stale: typeof cur === 'string' ? cur.toLowerCase() !== rec : null };
+  return { cv_url: url, cv_pages: pages, cv_stale: typeof cur === 'string' ? cur.toLowerCase() !== rec : null };
 }
 
 function parseTracker(content) {

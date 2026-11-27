@@ -74,6 +74,7 @@ test('export CLI --sync-plan without --current refuses (it would leave old parts
 
 // ---- CV links: export reads {DATA_ROOT}/data/dashboard.json and hashes the recorded files (temp copies only) ----
 const ASSET = 'f00dfeed0123456789abcdef01234567';
+const PAGE = 'f00dfeed0123456789abcdef0123pg01';
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 function withRoot(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'dash-cv-'));
@@ -102,6 +103,7 @@ test('export CLI: cv_url from data/dashboard.json, cv_stale from the PDF on disk
     5: { asset_id: ASSET, file: 'output/missing.pdf', sha256: sha('x') }, // missing file: unknown
     6: { asset_id: 'javascript:alert(1)', file: 'output/cv-cobalt.pdf', sha256: sha('x') }, // invalid id: no link
     7: { asset_id: ASSET, file: '../outside.pdf', sha256: sha('x') }, // outside the data root: never hashed
+    8: { asset_id: ASSET, file: 'output/cv-delta.pdf', sha256: sha('%PDF-1.4 fictional delta'), pages: [PAGE, 'javascript:alert(1)'] }, // PNG pages
   } }));
   const before = hashTree(root);
   const a = appsAt(root);
@@ -112,6 +114,8 @@ test('export CLI: cv_url from data/dashboard.json, cv_stale from the PDF on disk
   assert.deepEqual([a[6].cv_url, a[6].cv_stale], [null, null]);
   assert.deepEqual([a[7].cv_url, a[7].cv_stale], [`/_blob/${ASSET}`, null]);
   assert.deepEqual([a[2].cv_url, a[2].cv_stale], [null, null]);
+  assert.deepEqual([a[8].cv_pages, a[8].cv_stale], [[`/_blob/${PAGE}`], true]);
+  assert.ok([2, 3, 4, 5, 6, 7].every((n) => Array.isArray(a[n].cv_pages) && a[n].cv_pages.length === 0));
 }));
 
 test('export CLI: malformed or absent data/dashboard.json -> no crash, cv_url null everywhere', () => withRoot((root) => {
@@ -126,4 +130,6 @@ test('export CLI: malformed or absent data/dashboard.json -> no crash, cv_url nu
 test('export CLI: the fixture root links app 1 to its fictional CV asset', () => {
   const items = JSON.parse(run()).docs.filter((d) => d.path.startsWith('snapshot/apps-')).flatMap((d) => d.data.items);
   assert.equal(items.find((x) => x.num === 1).cv_url, '/_blob/0123456789abcdef0123456789abcdef');
+  assert.deepEqual(items.find((x) => x.num === 1).cv_pages, ['/_blob/0123456789abcdef0123456789abcd01', '/_blob/0123456789abcdef0123456789abcd02']);
+  assert.deepEqual(items.find((x) => x.num === 8).cv_pages, []); // hostile page ids dropped
 });

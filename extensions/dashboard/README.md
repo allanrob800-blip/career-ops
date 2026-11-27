@@ -44,17 +44,20 @@ Si la synchronisation s'arrête en route, la génération précédente reste ent
 
 ## CV des candidatures
 
-Chaque candidature peut ouvrir son CV adapté : la fiche de la candidature (ligne du tableau, ou `CapApp.openApp(num)`) montre un bouton « Ouvrir le CV (PDF) », et la ligne porte une petite marque « CV ». Le PDF est un fichier de l'artefact (un *asset*), servi par la plateforme à `/_blob/<asset_id>` : un simple lien, qui s'ouvre sur ordinateur comme sur iPhone.
+Chaque candidature peut montrer son CV adapté : la fiche de la candidature (ligne du tableau, ou `CapApp.openApp(num)`) a un bouton « Voir le CV », et la ligne porte une petite marque « CV ». Le CV s'affiche dans la fiche elle-même, page par page, en images (« ← Retour » ou Échap revient à la fiche).
+
+Pourquoi des images et pas le PDF : le cadre où claude.ai affiche la page refuse d'ouvrir un lien vers la page elle-même dans un nouvel onglet (« Impossible d'ouvrir ce lien ici. »), refuse les téléchargements lancés par la page, `<object>`, `<embed>` et `window.open`. Il accepte en revanche l'adresse `/_blob/<id>` d'un fichier de l'artefact (un *asset*) comme source d'une image. Le PDF n'est donc ni ouvrable ni téléchargeable depuis le tableau de bord ; la fiche le dit, et c'est Claude qui le fournit dans la session.
 
 Quand Claude a envoyé un nouveau CV adapté pour une candidature :
 
-1. Envoyer le PDF à l'artefact avec l'outil `upload_asset` (slug de `data/dashboard.json`). La page elle-même n'appelle jamais `claude.use("assets")` : seule la déclaration `assets: {}` (voir « Capacités déclarées ») est nécessaire, pour l'outil d'envoi.
-2. Noter le résultat dans `{DATA_ROOT}/data/dashboard.json`, sous `cv_assets["<n° du tracker>"]` :
-   `{"asset_id": "<id renvoyé>", "file": "output/<fichier>.pdf", "sha256": "<empreinte sha256 du PDF envoyé>"}`
-   (`file` est relatif à la racine des données ; `sha256sum output/<fichier>.pdf` donne l'empreinte).
-3. Refaire l'étape 2 de la synchronisation (« Envoyer l'instantané »).
+1. Rendre chaque page du PDF en PNG (A4 à 150 dpi, 1240 × 1754 px) : `pdftoppm -r 150 -png output/<fichier>.pdf <dossier temporaire>/cv` (donne `cv-1.png`, `cv-2.png`, …).
+2. Envoyer chaque PNG à l'artefact avec l'outil `upload_asset` (slug de `data/dashboard.json`), dans l'ordre des pages. Envoyer aussi le PDF reste possible (son id va dans `asset_id`), mais la page ne le relie plus. La page elle-même n'appelle jamais `claude.use("assets")` : seule la déclaration `assets: {}` (voir « Capacités déclarées ») est nécessaire, pour l'outil d'envoi.
+3. Noter le résultat dans `{DATA_ROOT}/data/dashboard.json`, sous `cv_assets["<n° du tracker>"]` :
+   `{"asset_id": "<id du PDF, facultatif>", "file": "output/<fichier>.pdf", "sha256": "<empreinte sha256 du PDF>", "pages": ["<id page 1>", "<id page 2>"]}`
+   (`file` est relatif à la racine des données ; `sha256sum output/<fichier>.pdf` donne l'empreinte ; `pages` dans l'ordre).
+4. Refaire l'étape 2 de la synchronisation (« Envoyer l'instantané »).
 
-`export.mjs` ne crée un lien que pour un `asset_id` de 8 à 128 caractères `[A-Za-z0-9_-]`, et la page vérifie de nouveau que l'adresse est exactement `/_blob/<id>`. Si le fichier `file` existe et que son empreinte actuelle diffère de `sha256` (le CV a été refait sans être renvoyé), la fiche l'indique : « Ce CV a été modifié depuis son envoi sur le tableau de bord. » Renvoyer alors le PDF et mettre à jour l'entrée. Un `data/dashboard.json` absent ou illisible ne bloque rien : aucune candidature n'a de lien.
+`export.mjs` ne garde que les ids de 8 à 128 caractères `[A-Za-z0-9_-]` (6 pages au plus) et en fait `cv_pages` (`["/_blob/<id>", …]`) ; la page vérifie de nouveau que chaque adresse est exactement `/_blob/<id>` avant d'en faire une image. Une page qui ne se charge pas est remplacée par « Page indisponible. Elle sera rétablie à la prochaine synchronisation. » Si le fichier `file` existe et que son empreinte actuelle diffère de `sha256` (le CV a été refait sans être renvoyé ; les images, tirées de l'ancien PDF, sont alors périmées aussi), la fiche et la vue du CV l'indiquent : « Ce CV a été modifié depuis son envoi sur le tableau de bord. » Refaire alors les étapes 1 à 4. Un `data/dashboard.json` absent ou illisible ne bloque rien : aucune candidature n'a de CV.
 
 ## Publier la page
 
@@ -73,7 +76,7 @@ Avec `read_declaration` puis `declare_capabilities` (la déclaration est complè
  "assets":{}}
 ```
 
-`assets: {}` est là pour l'outil `upload_asset`, qui envoie les CV (voir « CV des candidatures ») ; la page n'utilise pas cette capacité, elle ne fait que des liens vers `/_blob/<id>`.
+`assets: {}` est là pour l'outil `upload_asset`, qui envoie les pages des CV (voir « CV des candidatures ») ; la page n'utilise pas cette capacité, elle affiche seulement des images `/_blob/<id>`.
 
 Pas de `desktop` (inutilisé) ni de `user` (la page ne l'appelle pas). La page n'utilise que les deux outils de recherche Outlook : elle n'envoie, ne déplace et ne supprime aucun e-mail.
 

@@ -14,7 +14,7 @@
     if (typeof url !== 'string' || !/^https:\/\//i.test(url.trim())) return null;
     try { const u = new URL(url.trim()); return u.protocol === 'https:' && u.hostname ? u.href : null; } catch { return null; }
   }
-  // A CV asset served by the platform: exactly /_blob/<asset id>, nothing else. Returns it or null.
+  // An asset served by the platform (a CV page image): exactly /_blob/<asset id>, nothing else. Returns it or null.
   const blobHref = (v) => (typeof v === 'string' && /^\/_blob\/[A-Za-z0-9_-]{8,128}$/.test(v) ? v : null);
   const hostOf = (url) => { const h = safeHref(url); return h ? new URL(h).hostname.replace(/^www\./, '') : null; };
   const fold = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -127,7 +127,8 @@
     return true;
   }
 
-  function dialog({ title, html = '', id = 'cap-dialog', onClose } = {}) {
+  // onEscape: called first on Escape; returning true keeps the dialog open (e.g. a sub-view going back a level).
+  function dialog({ title, html = '', id = 'cap-dialog', onClose, onEscape } = {}) {
     closeDialog();
     const back = document.activeElement;
     const el = document.createElement('div');
@@ -151,7 +152,13 @@
       if (back && back.isConnected && typeof back.focus === 'function') back.focus();
     };
     const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        let kept = false;
+        if (onEscape) try { kept = onEscape() === true; } catch (err) { console.error(err); }
+        if (!kept) close();
+        return;
+      }
       trapTab(el, e);
     };
     el.addEventListener('click', (e) => { if (e.target.closest('[data-dlg-close]')) close(); });

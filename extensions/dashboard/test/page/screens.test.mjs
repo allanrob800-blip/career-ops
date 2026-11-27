@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { deflateSync, crc32 } from 'node:zlib';
 import { startServer, launchBrowser, openPage } from './harness.mjs';
 import { fixtureDocs, EMAILS, EVENTS, NOW } from './fixtures.mjs';
 
@@ -344,8 +345,42 @@ for (const [label, mcp, count] of [
   });
 }
 
-// ---- CV link in the detail sheet: only /_blob/<asset id>, never anything else ----
-const CV_ID = '0123456789abcdef0123456789abcdef'; // the fixture root's fictional asset for app 1
+// ---- CV viewer in the detail sheet: the PNG pages (/_blob/<asset id>) shown in the page, never a PDF link ----
+// The frame refuses same-origin links in a new tab, downloads, <object>/<embed> and window.open: only <img> works.
+const PAGES = ['/_blob/0123456789abcdef0123456789abcd01', '/_blob/0123456789abcdef0123456789abcd02']; // fixture app 1
+const NOTE = 'Le PDF n\'est pas téléchargeable depuis le tableau de bord : demandez-le à Claude dans la session.';
+const MISSING = 'Page indisponible. Elle sera rétablie à la prochaine synchronisation.';
+const STALE = 'Ce CV a été modifié depuis son envoi sur le tableau de bord.';
+
+// A tiny white A4-shaped PNG (124x175), built here so no binary fixture lives in the repo.
+function tinyPng(w = 124, h = 175) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td) >>> 0);
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; // 8-bit RGB
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 0xff)]);
+  const raw = Buffer.concat(Array.from({ length: h }, () => row));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+const PNG = tinyPng();
+
+// Serves /_blob/<id> as the platform would for an uploaded PNG; ids in `missing` answer 404.
+async function openCv(opts = {}) {
+  const { missing = [], ...rest } = opts;
+  const p = await open(rest);
+  p.blobs = [];
+  await p.context.route(/\/_blob\//, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    p.blobs.push(path);
+    if (missing.includes(path)) return route.fulfill({ status: 404, body: 'not found' });
+    return route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
+  });
+  return p;
+}
 const withApp = (num, patch) => {
   const docs = structuredClone(DOCS);
   for (const [k, v] of Object.entries(docs)) if (k.startsWith('snapshot/apps-')) for (const a of v.items) if (a.num === num) Object.assign(a, patch);
@@ -358,56 +393,189 @@ async function openSheet(p, num) {
   await dlg.waitFor();
   return dlg;
 }
+async function openViewer(p, num) {
+  const dlg = await openSheet(p, num);
+  await dlg.locator('button.cv-open').click();
+  await dlg.locator('.cv-view').waitFor();
+  return dlg;
+}
+const loaded = (p) => p.page.waitForFunction(() => { const i = document.querySelector('.cv-view img'); return i && i.complete && i.naturalWidth > 0; });
+// Only the « Failed to load resource » line a 404 image logs is expected; anything else is a real error.
+const realErrors = (p) => p.errors.filter((e) => !/Failed to load resource/.test(e));
 
-test('CV link: the detail sheet opens /_blob/<id> in a new tab, >= 44px, row marked « CV »', async () => {
-  const p = await open({ device: { width: 430, height: 900 }, reducedMotion: true });
+test('CV viewer: « Voir le CV » only when pages exist; row marked « CV »; no PDF link, no new tab', async () => {
+  const p = await openCv({ device: { width: 430, height: 900 }, reducedMotion: true });
   try {
     await go(p, 'candidatures');
     assert.equal(await p.page.locator('#app-list [data-num="1"] .cv-mark').count(), 1);
-    assert.equal(await p.page.locator('#app-list [data-num="3"] .cv-mark').count(), 0);
-    assert.equal(await p.page.locator('#app-list .cv-mark').count(), 1); // app 8's hostile asset id was dropped by export
-    const dlg = await openSheet(p, 1);
-    const link = dlg.locator('a.cv-link');
-    assert.equal(await link.count(), 1);
-    assert.equal(await link.getAttribute('href'), `/_blob/${CV_ID}`);
-    assert.equal(await link.getAttribute('target'), '_blank');
-    assert.match(await link.getAttribute('rel'), /\bnoopener\b/);
-    assert.equal(await link.getAttribute('download'), null);
-    assert.equal((await link.innerText()).trim(), 'Ouvrir le CV (PDF)');
-    const b = await link.boundingBox();
-    assert.ok(b.height >= 44, `cv link ${b.height}px`);
+    assert.equal(await p.page.locator('#app-list .cv-mark').count(), 1); // app 8's hostile ids were dropped by export
+    let dlg = await openSheet(p, 3);
+    assert.equal(await dlg.locator('button.cv-open').count(), 0);
+    await p.page.keyboard.press('Escape');
+    dlg = await openSheet(p, 1);
+    const btn = dlg.locator('button.cv-open');
+    assert.equal(await btn.count(), 1);
+    assert.equal((await btn.innerText()).trim(), 'Voir le CV');
+    assert.match(await btn.getAttribute('class'), /\bbtn btn-soft\b/);
+    assert.equal(await btn.locator('svg').count(), 1);
+    assert.ok((await btn.boundingBox()).height >= 44);
+    assert.equal(await p.page.locator('a[href*="_blob"], a.cv-link, a[download], object, embed').count(), 0);
     assert.equal(await dlg.locator('.cv-stale').count(), 0);
+    assert.equal(await dlg.locator('img').count(), 0, 'no page image is fetched before the viewer opens');
+    assert.deepEqual(p.blobs, []);
     assert.deepEqual(await p.page.evaluate(tooSmall, '.dlg'), []);
     assert.deepEqual(p.errors, []);
   } finally { await p.close(); }
 });
 
-test('CV link: hostile or malformed cv_url values are never linked', async () => {
-  for (const bad of ['javascript:alert(1)', 'https://evil.example/x.pdf', '/_blob/../x', '/_blob/short', `/_blob/${CV_ID}?x=1`, ` /_blob/${CV_ID}`,
-    `//evil.example/_blob/${CV_ID}`, `/_blob/${CV_ID}/`, `/_blob/${CV_ID}"onmouseover="alert(1)`, `/_blob/${'a'.repeat(129)}`, 42, { href: 'x' }]) {
-    const p = await open({ docs: withApp(1, { cv_url: bad, cv_stale: true }) });
+test('CV viewer: opens in the sheet with one lazy image per page, exact /_blob/ src, note, focus on Retour', async () => {
+  const p = await openCv({ device: { width: 430, height: 932 }, reducedMotion: true });
+  try {
+    const dlg = await openViewer(p, 1);
+    const imgs = dlg.locator('.cv-view img');
+    assert.equal(await imgs.count(), 2);
+    for (let i = 0; i < 2; i++) {
+      const img = imgs.nth(i);
+      assert.equal(await img.getAttribute('src'), PAGES[i]);
+      assert.equal(await img.getAttribute('alt'), `CV — page ${i + 1} sur 2`);
+      assert.equal(await img.getAttribute('loading'), 'lazy');
+      assert.equal(await img.getAttribute('decoding'), 'async');
+    }
+    assert.equal(await dlg.locator('.detail-main').isVisible(), false);
+    assert.equal(await dlg.locator('#form-note').isVisible(), false);
+    assert.equal((await dlg.locator('.cv-note').innerText()).trim(), NOTE);
+    assert.equal(await dlg.locator('.cv-stale').isVisible(), false);
+    assert.equal(await p.page.evaluate(() => document.activeElement?.classList.contains('cv-back')), true);
+    assert.equal((await dlg.locator('.cv-back').innerText()).trim(), '← Retour');
+    assert.match(await p.page.locator('.dlg-title').innerText(), /^CV/);
+    await loaded(p);
+    // full-height sheet on the phone; every image as wide as the viewer, inside the screen
+    const panel = await dlg.locator('.dlg-panel').boundingBox();
+    assert.ok(panel.height >= 932 - 2 && panel.y <= 1, `panel ${JSON.stringify(panel)}`);
+    const first = await imgs.nth(0).boundingBox();
+    const box = await dlg.locator('.cv-pages').boundingBox();
+    assert.ok(first.x >= 0 && first.x + first.width <= 430, `img ${JSON.stringify(first)}`);
+    assert.ok(Math.abs(first.width - box.width) <= 1, `img ${first.width} vs viewer ${box.width}`);
+    assert.ok(first.width >= 380, `img only ${first.width}px wide`);
+    assert.ok(first.height > first.width * 1.3, 'A4 portrait aspect');
+    assert.equal(await imgs.nth(0).evaluate((i) => getComputedStyle(i).backgroundColor), 'rgb(255, 255, 255)');
+    assert.notEqual(await imgs.nth(0).evaluate((i) => getComputedStyle(i).boxShadow), 'none');
+    const r = await p.page.evaluate(overflowScan);
+    assert.ok(r.sw <= r.W, `scrollWidth ${r.sw} > ${r.W}`);
+    assert.deepEqual(r.bad, []);
+    assert.deepEqual(await p.page.evaluate(tooSmall, '.dlg'), []);
+    assert.equal(await p.page.evaluate(() => document.getAnimations().length), 0, 'no animation under reduced motion');
+    assert.ok(p.blobs.every((b) => PAGES.includes(b)));
+    await p.page.screenshot({ path: join(SHOTS, 'cv-viewer-430.png') });
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('CV viewer: Retour restores the detail (focus on « Voir le CV »), Escape goes back then closes, × closes', async () => {
+  const p = await openCv({ device: { width: 1440, height: 900 }, reducedMotion: true });
+  try {
+    let dlg = await openViewer(p, 1);
+    await dlg.locator('#detail-note').evaluate((t) => { t.value = 'brouillon'; }); // hidden but kept
+    await dlg.locator('.cv-back').click();
+    assert.equal(await dlg.locator('.cv-view').isVisible(), false);
+    assert.equal(await dlg.locator('.detail-main').isVisible(), true);
+    assert.equal(await dlg.locator('#detail-note').inputValue(), 'brouillon');
+    assert.equal(await p.page.evaluate(() => document.activeElement?.classList.contains('cv-open')), true);
+    assert.equal((await p.page.locator('.dlg-title').innerText()).trim(), 'Acme');
+    // Escape in the viewer: back to the detail, the sheet stays open; Escape again closes it
+    await dlg.locator('button.cv-open').click();
+    await dlg.locator('.cv-view').waitFor();
+    await p.page.keyboard.press('Escape');
+    assert.equal(await p.page.locator('.dlg').count(), 1);
+    assert.equal(await dlg.locator('.detail-main').isVisible(), true);
+    assert.equal(await p.page.evaluate(() => document.activeElement?.classList.contains('cv-open')), true);
+    await p.page.keyboard.press('Escape');
+    assert.equal(await p.page.locator('.dlg').count(), 0);
+    // × from the viewer closes the whole sheet; focus goes back to the row
+    dlg = await openViewer(p, 1);
+    await dlg.locator('.dlg-head [data-dlg-close]').click();
+    assert.equal(await p.page.locator('.dlg').count(), 0);
+    assert.equal(await p.page.evaluate(() => document.activeElement?.closest('[data-num]')?.dataset.num), '1');
+    // reopening starts on the detail, not the viewer
+    dlg = await openSheet(p, 1);
+    assert.equal(await dlg.locator('.detail-main').isVisible(), true);
+    assert.equal(await dlg.locator('.cv-view').count(), 0);
+    // Tab stays inside the sheet while the viewer is open
+    await dlg.locator('button.cv-open').click();
+    for (let i = 0; i < 6; i++) {
+      await p.page.keyboard.press('Tab');
+      assert.equal(await p.page.evaluate(() => !!document.activeElement?.closest('.dlg') && !document.activeElement.closest('.detail-main')), true);
+    }
+    // PC: a wider panel than the detail sheet, images fit it
+    await loaded(p);
+    const img = await dlg.locator('.cv-view img').first().boundingBox();
+    assert.ok(img.width >= 700 && img.x >= 0 && img.x + img.width <= 1440, `img ${JSON.stringify(img)}`);
+    await p.page.screenshot({ path: join(SHOTS, 'cv-viewer-1440.png') });
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('CV viewer: hostile or malformed cv_pages are never rendered as an image source', async () => {
+  const bads = ['javascript:alert(1)', 'https://evil.example/x.png', '/_blob/../x', '/_blob/short', `${PAGES[0]}?x=1`, ` ${PAGES[0]}`,
+    `//evil.example${PAGES[0]}`, `${PAGES[0]}/`, `${PAGES[0]}"onerror="alert(1)`, `/_blob/${'a'.repeat(129)}`, 'data:image/png;base64,AAAA', 42, null, { src: PAGES[0] }];
+  for (const pages of [bads, PAGES[0], { 0: PAGES[0] }, null]) {
+    const p = await openCv({ docs: withApp(1, { cv_pages: pages, cv_stale: true }) });
     try {
       await go(p, 'candidatures');
-      assert.equal(await p.page.locator('.cv-mark').count(), 0, String(bad));
+      assert.equal(await p.page.locator('.cv-mark').count(), 0, JSON.stringify(pages));
       const dlg = await openSheet(p, 1);
-      assert.equal(await dlg.locator('a.cv-link').count(), 0, String(bad));
-      assert.equal(await dlg.locator('.cv-stale').count(), 0, String(bad));
-      assert.equal(await p.page.locator('a[href*="_blob"], a[href^="javascript"], a[href*="evil"]').count(), 0, String(bad));
+      assert.equal(await dlg.locator('button.cv-open').count(), 0, JSON.stringify(pages));
+      assert.equal(await dlg.locator('.cv-stale').count(), 0);
+      assert.equal(await p.page.locator('img, a[href*="_blob"], a[href^="javascript"], [src*="evil"]').count(), 0);
+      assert.deepEqual(p.dialogs, []);
+      assert.deepEqual(p.errors, []);
+    } finally { await p.close(); }
+  }
+  // mixed: only the valid entry is shown, and the count follows it; at most 6 pages
+  const many = Array.from({ length: 8 }, (_, i) => `/_blob/0123456789abcdef0123456789abcd${String(i).padStart(2, '0')}`);
+  for (const [pages, want] of [[[...bads, PAGES[1]], [PAGES[1]]], [many, many.slice(0, 6)]]) {
+    const p = await openCv({ docs: withApp(1, { cv_pages: pages }) });
+    try {
+      const dlg = await openViewer(p, 1);
+      const srcs = await dlg.locator('.cv-view img').evaluateAll((l) => l.map((i) => i.getAttribute('src')));
+      assert.deepEqual(srcs, want);
+      assert.equal(await dlg.locator('.cv-view img').last().getAttribute('alt'), `CV — page ${want.length} sur ${want.length}`);
+      assert.equal(await p.page.locator('img').count(), want.length);
       assert.deepEqual(p.dialogs, []);
       assert.deepEqual(p.errors, []);
     } finally { await p.close(); }
   }
 });
 
-test('CV link: a stale CV shows the French note; no overflow with the sheet open at 360px', async () => {
-  const p = await open({ device: { width: 360, height: 800 }, reducedMotion: true, docs: withApp(1, { cv_stale: true }) });
+test('CV viewer: a stale CV shows the note in the detail and the viewer; no overflow at 360px', async () => {
+  const p = await openCv({ device: { width: 360, height: 800 }, reducedMotion: true, docs: withApp(1, { cv_stale: true }) });
   try {
     const dlg = await openSheet(p, 1);
-    assert.equal(await dlg.locator('a.cv-link').getAttribute('href'), `/_blob/${CV_ID}`);
-    assert.equal((await dlg.locator('.cv-stale').innerText()).trim(), 'Ce CV a été modifié depuis son envoi sur le tableau de bord.');
+    assert.equal((await dlg.locator('.detail-main .cv-stale').innerText()).trim(), STALE);
+    await dlg.locator('button.cv-open').click();
+    assert.equal((await dlg.locator('.cv-view .cv-stale').innerText()).trim(), STALE);
+    await loaded(p);
+    const img = await dlg.locator('.cv-view img').first().boundingBox();
+    assert.ok(img.x >= 0 && img.x + img.width <= 360, `img ${JSON.stringify(img)}`);
     const r = await p.page.evaluate(overflowScan);
     assert.ok(r.sw <= r.W, `scrollWidth ${r.sw} > ${r.W}`);
     assert.deepEqual(r.bad, []);
+    assert.equal(await dlg.locator('.dlg-panel').evaluate((e) => e.scrollWidth <= e.clientWidth), true);
+    await p.page.screenshot({ path: join(SHOTS, 'cv-viewer-360.png') });
     assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('CV viewer: a page that fails to load is replaced by a French message, no broken image', async () => {
+  const p = await openCv({ device: { width: 430, height: 932 }, reducedMotion: true, missing: [PAGES[1]] });
+  try {
+    const dlg = await openViewer(p, 1);
+    await dlg.locator('.cv-page').nth(1).scrollIntoViewIfNeeded();
+    await p.page.waitForFunction(() => document.querySelectorAll('.cv-view .cv-missing').length === 1);
+    assert.equal((await dlg.locator('.cv-missing').innerText()).trim(), MISSING);
+    assert.deepEqual(await dlg.locator('.cv-view img').evaluateAll((l) => l.map((i) => i.getAttribute('src'))), [PAGES[0]]);
+    assert.equal(await dlg.locator('.cv-page').count(), 2, 'the page keeps its place in the stack');
+    assert.ok(p.blobs.includes(PAGES[1]));
+    assert.deepEqual(realErrors(p), []);
   } finally { await p.close(); }
 });

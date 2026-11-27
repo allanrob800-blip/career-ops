@@ -176,3 +176,53 @@ test('parseCvAssets: keeps only well-formed entries keyed by tracker num', () =>
   assert.deepEqual(Object.keys(got), ['3']);
   assert.equal(got['3'].file, 'output/c.pdf');
 });
+
+// ---- CV pages: cv_assets["<num>"].pages = [<asset id>, …] -> cv_pages ['/_blob/<id>', …] (PNG renders of the PDF) ----
+const P1 = 'p1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const P2 = 'p2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+test('cv_pages: valid page ids become /_blob/<id> in order; other apps get []', () => {
+  const input = loadFixtureInput(NOW);
+  input.dashboardJson = dash({ 3: { asset_id: ID, file: 'output/c.pdf', sha256: SHA, pages: [P1, P2] } });
+  const s = buildSnapshot(input);
+  assert.deepEqual(s.apps.find((a) => a.num === 3).cv_pages, [`/_blob/${P1}`, `/_blob/${P2}`]);
+  assert.ok(s.apps.filter((a) => a.num !== 3).every((a) => Array.isArray(a.cv_pages) && a.cv_pages.length === 0));
+});
+
+test('cv_pages: an invalid page id is dropped, the valid ones kept; at most 6 pages', () => {
+  const input = loadFixtureInput(NOW);
+  input.dashboardJson = dash({
+    3: { asset_id: ID, pages: [P1, 'javascript:alert(1)', '../../etc/passwd', 'short', 'https://evil.example/x.png', 42, null, { id: P2 }, 'a'.repeat(129), P2] },
+    4: { asset_id: ID, pages: Array.from({ length: 9 }, (_, i) => `page${i}xxxxxxxxxxxxxxxx`) },
+  });
+  const s = buildSnapshot(input);
+  assert.deepEqual(s.apps.find((a) => a.num === 3).cv_pages, [`/_blob/${P1}`, `/_blob/${P2}`]);
+  assert.deepEqual(s.apps.find((a) => a.num === 4).cv_pages, Array.from({ length: 6 }, (_, i) => `/_blob/page${i}xxxxxxxxxxxxxxxx`));
+});
+
+test('cv_pages: missing or not an array -> []; cv_url and cv_stale unchanged', () => {
+  for (const pages of [undefined, null, 'x', P1, {}, { 0: P1 }, []]) {
+    const input = loadFixtureInput(NOW);
+    input.dashboardJson = dash({ 3: { asset_id: ID, file: 'output/c.pdf', sha256: SHA, ...(pages === undefined ? {} : { pages }) } });
+    input.cvFileHashes = { 'output/c.pdf': 'bb'.repeat(32) };
+    const a = appOf(input, 3);
+    assert.deepEqual(a.cv_pages, [], String(pages));
+    assert.equal(a.cv_url, `/_blob/${ID}`);
+    assert.equal(a.cv_stale, true);
+  }
+  for (const json of [undefined, '{not json', '{"cv_assets":{"3":null}}']) {
+    const input = loadFixtureInput(NOW);
+    if (json !== undefined) input.dashboardJson = json;
+    assert.ok(buildSnapshot(input).apps.every((a) => Array.isArray(a.cv_pages) && a.cv_pages.length === 0), String(json));
+  }
+});
+
+test('cv_pages: pages without a valid PDF asset id still show; stale is computed from the PDF hash', () => {
+  const input = loadFixtureInput(NOW);
+  input.dashboardJson = dash({ 3: { file: 'output/c.pdf', sha256: SHA, pages: [P1] }, 4: { asset_id: 'bad', file: 'output/c.pdf', sha256: SHA, pages: [P2] } });
+  input.cvFileHashes = { 'output/c.pdf': 'bb'.repeat(32) };
+  const s = buildSnapshot(input);
+  const by = (n) => s.apps.find((a) => a.num === n);
+  assert.deepEqual([by(3).cv_url, by(3).cv_pages, by(3).cv_stale], [null, [`/_blob/${P1}`], true]);
+  assert.deepEqual([by(4).cv_url, by(4).cv_pages, by(4).cv_stale], [null, [`/_blob/${P2}`], true]);
+});

@@ -1,6 +1,7 @@
 /*
  * Candidatures: status filters, table (stacked cards on phones), columns by status above 1100px,
- * detail sheet with « Changer le statut » / « Ajouter une note » (written as requests, applied by Claude).
+ * detail sheet with « Changer le statut » / « Ajouter une note » (written as requests, applied by Claude),
+ * and « Voir le CV »: the tailored CV's pages as images, shown in the same sheet (« ← Retour » or Escape goes back).
  */
 (() => {
   'use strict';
@@ -24,7 +25,13 @@
     }).join('');
   }
 
-  const cvMark = (a) => (CapUI.blobHref(a.cv_url) ? '<span class="cv-mark" title="CV disponible">CV</span>' : '');
+  // The CV is shown as its page images (/_blob/<asset id>, PNG): the frame refuses PDF links, downloads, <object>,
+  // <embed> and window.open, so cv_url (the PDF) is never linked. Only exact /_blob/<id> strings, at most 6 pages.
+  const CV_MAX_PAGES = 6;
+  const cvPages = (a) => (Array.isArray(a.cv_pages) ? a.cv_pages.map((v) => CapUI.blobHref(v)).filter(Boolean).slice(0, CV_MAX_PAGES) : []);
+  const CV_STALE = '<p class="cv-stale small">Ce CV a été modifié depuis son envoi sur le tableau de bord.</p>';
+  const CV_MISSING = 'Page indisponible. Elle sera rétablie à la prochaine synchronisation.';
+  const cvMark = (a) => (cvPages(a).length ? '<span class="cv-mark" title="CV disponible">CV</span>' : '');
 
   const statusChip = (s) => `<span class="status s-${CapUI.tone(s)}">${CapUI.esc(CapUI.statusLabel(s))}</span>`;
 
@@ -83,22 +90,22 @@
   function detailHtml(a, snap) {
     const { esc } = CapUI;
     const href = CapUI.safeHref(a.url);
-    const cv = CapUI.blobHref(a.cv_url);
+    const cv = cvPages(a).length > 0;
     const links = [
       href ? `<a class="btn btn-soft" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${CapUI.ICON.link}<span>Voir l'offre</span></a>` : '',
-      cv ? `<a class="btn btn-soft cv-link" href="${esc(cv)}" target="_blank" rel="noopener">${CapUI.ICON.doc}<span>Ouvrir le CV (PDF)</span></a>` : '',
+      cv ? `<button type="button" class="btn btn-soft cv-open">${CapUI.ICON.doc}<span>Voir le CV</span></button>` : '',
     ].join('');
     const report = (snap.reports || []).find((r) => r && r.num === a.report_num && a.report_num != null);
     const urg = { overdue: 'en retard', urgent: 'urgente', waiting: 'à venir', cold: 'sans réponse' }[a.followup_urgency] || '';
     const opts = CapUI.STATUSES.map((s) => `<option value="${s}"${s === a.status ? ' selected' : ''}>${esc(CapUI.statusLabel(s))} (${s})</option>`).join('');
-    return `<p class="detail-role">${esc(a.role)}</p>
+    return `<div class="detail-main"><p class="detail-role">${esc(a.role)}</p>
       <div class="detail-chips">${statusChip(a.status)}${a.score != null ? `<span class="status s-base">${esc(CapUI.fmtNum(a.score))}/5</span>` : ''}</div>
       <dl class="facts">
         <div><dt>Envoyée le</dt><dd>${esc(CapUI.fmtDay(a.applied_on))}</dd></div>
         <div><dt>Prochaine relance</dt><dd>${esc(CapUI.fmtDay(a.next_followup))}${urg && CapUI.isoDay(a.next_followup) ? ` · ${esc(urg)}` : ''}</dd></div>
         <div><dt>Clôture de l'offre</dt><dd>${esc(CapUI.fmtDay(a.closes_at))}</dd></div></dl>
       ${links ? `<div class="detail-links">${links}</div>` : ''}
-      ${cv && a.cv_stale === true ? '<p class="cv-stale small">Ce CV a été modifié depuis son envoi sur le tableau de bord.</p>' : ''}
+      ${cv && a.cv_stale === true ? CV_STALE : ''}
       <h3 class="sub-title">Historique</h3><ol class="history">${historyHtml(a) || '<li class="muted">Pas encore d\'historique.</li>'}</ol>
       ${report && CapUI.reportHtml ? `<details class="report-box"><summary>Résumé du rapport</summary>${CapUI.reportHtml(report)}</details>` : ''}
       <div id="detail-pending" class="detail-pending"></div>
@@ -113,7 +120,19 @@
         <div class="req-row"><span class="muted small" id="note-left">500 caractères au plus</span>
           <button type="submit" class="btn btn-acc" id="detail-note-send">Ajouter la note</button></div>
         <p class="req-err" id="err-note" role="alert" hidden></p></form>
-      <p class="muted small">Claude applique ces demandes à la prochaine session career-ops.</p>`;
+      <p class="muted small">Claude applique ces demandes à la prochaine session career-ops.</p></div>`;
+  }
+
+  // The CV viewer, inside the detail sheet: one image per page, as wide as the sheet (A4 aspect reserved before load).
+  function cvViewHtml(a, pages) {
+    const { esc } = CapUI;
+    const n = pages.length;
+    return `<div class="cv-view">
+      <div class="cv-bar"><button type="button" class="btn btn-soft cv-back"><span><span aria-hidden="true">← </span>Retour</span></button>
+        <span class="muted small">${esc(CapUI.plural(n, 'page', 'pages'))}</span></div>
+      ${a.cv_stale === true ? CV_STALE : ''}
+      <div class="cv-pages">${pages.map((src, i) => `<figure class="cv-page"><img src="${esc(src)}" alt="CV — page ${i + 1} sur ${n}" width="1240" height="1754" loading="lazy" decoding="async"></figure>`).join('')}</div>
+      <p class="muted small cv-note">Le PDF n'est pas téléchargeable depuis le tableau de bord : demandez-le à Claude dans la session.</p></div>`;
   }
 
   function refreshDetail(state) {
@@ -127,9 +146,56 @@
     const st = current && current.state;
     const a = st && st.snapshot && (st.snapshot.apps || []).find((x) => x.num === num);
     if (!a) return;
-    const dlg = CapUI.dialog({ id: 'app-detail', title: String(a.company ?? ''), html: detailHtml(a, st.snapshot), onClose: () => { detail = null; } });
+    const title = String(a.company ?? '');
+    const dlg = CapUI.dialog({ id: 'app-detail', title, html: detailHtml(a, st.snapshot), onClose: () => { detail = null; }, onEscape: () => hideCv() });
     detail = { num, dlg };
     refreshDetail(st);
+    // « Voir le CV » swaps the sheet's content for the viewer; the detail stays in the DOM (hidden), so a note being
+    // typed survives, and « ← Retour » / Escape restore it with focus on « Voir le CV ». The dialog's own focus trap
+    // skips [hidden] content, and × still closes the whole sheet.
+    const main = dlg.el.querySelector('.detail-main');
+    const panel = dlg.el.querySelector('.dlg-panel');
+    const titleEl = dlg.el.querySelector('.dlg-title');
+    let cvView = null, scrollBack = 0;
+    function showCv() {
+      const pages = cvPages(a);
+      if (!pages.length) return;
+      if (!cvView) {
+        dlg.body.insertAdjacentHTML('beforeend', cvViewHtml(a, pages));
+        cvView = dlg.body.querySelector('.cv-view');
+        cvView.querySelector('.cv-back').addEventListener('click', hideCv);
+        // error does not bubble: listen in the capture phase; the page keeps its place in the stack, as a message
+        cvView.addEventListener('error', (e) => {
+          const img = e.target;
+          if (!(img instanceof HTMLImageElement) || !img.closest('.cv-page')) return;
+          const msg = document.createElement('p');
+          msg.className = 'cv-missing';
+          msg.textContent = CV_MISSING;
+          img.closest('.cv-page').classList.add('is-missing');
+          img.replaceWith(msg);
+        }, true);
+      }
+      scrollBack = panel.scrollTop;
+      main.hidden = true;
+      cvView.hidden = false;
+      dlg.el.classList.add('is-cv');
+      titleEl.textContent = `CV — ${title}`;
+      panel.scrollTop = 0;
+      cvView.querySelector('.cv-back').focus();
+    }
+    function hideCv() {
+      if (!cvView || cvView.hidden) return false;
+      cvView.hidden = true;
+      main.hidden = false;
+      dlg.el.classList.remove('is-cv');
+      titleEl.textContent = title;
+      panel.scrollTop = scrollBack;
+      const btn = main.querySelector('.cv-open');
+      if (btn) btn.focus();
+      return true;
+    }
+    const cvBtn = main.querySelector('.cv-open');
+    if (cvBtn) cvBtn.addEventListener('click', showCv);
     const showErr = (id, msg) => { const e = dlg.el.querySelector(id); e.textContent = msg; e.hidden = !msg; };
     dlg.el.querySelector('#form-status').addEventListener('submit', async (e) => {
       e.preventDefault();

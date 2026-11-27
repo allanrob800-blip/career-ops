@@ -165,18 +165,24 @@
 
   const sortedKeys = (k, v) => (isObj(v) ? Object.fromEntries(Object.keys(v).sort().map((key) => [key, v[key]])) : v);
 
+  // Freshness comes from result.cache.storedAt (epoch ms); a result without a usable stamp is fresh.
+  function stampOf(result) {
+    const v = isObj(result) && isObj(result.cache) ? result.cache.storedAt : null;
+    return Number.isFinite(v) && v > 0 && v <= Date.now() + DAY_MS ? v : Date.now();
+  }
+
   function onEvent(w, ev) {
     if (!isObj(ev)) return;
     if (ev.type === 'data') {
-      const cache = isObj(ev.result) && isObj(ev.result.cache) ? ev.result.cache : null;
       w.items = itemsOf(ev.result);
-      w.storedAt = cache && Number.isFinite(cache.storedAt) ? cache.storedAt : Date.now(); // no cache = fresh
+      w.storedAt = stampOf(ev.result);
       w.error = null;
     } else if (ev.type === 'error') {
       const code = codeOf(ev.error);
       if (code === 'cancelled') return; // an abandoned refetch says nothing about Outlook
       w.error = code;
-      if (RETRACT.has(w.error)) { w.items = null; w.storedAt = null; }
+      // A denial concerns the whole section: drop what its other watches hold too, so nothing stale comes back.
+      if (RETRACT.has(code)) for (const x of watches) if (x.section === w.section) { x.items = null; x.storedAt = null; }
     } else return;
     emit();
   }
@@ -350,8 +356,7 @@
     emit();
     return Promise.resolve(call).then((result) => {
       w.items = itemsOf(result);
-      const cache = isObj(result) && isObj(result.cache) ? result.cache : null;
-      w.storedAt = cache && Number.isFinite(cache.storedAt) ? cache.storedAt : Date.now();
+      w.storedAt = stampOf(result);
       for (const x of watches) if (x.tool === w.tool && APPROVAL.has(x.error)) x.error = null; // granted: they refetch below
       try { if (typeof mcp.invalidate === 'function') mcp.invalidate(SERVER, w.tool); } catch (e) { console.error('CapOutlook: invalidate failed', e); }
     }, (err) => {

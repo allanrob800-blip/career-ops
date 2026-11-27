@@ -204,6 +204,27 @@ test('authorization error after a good delivery retracts the data on every scree
   } finally { await p.close(); }
 });
 
+test('an authorization error on one watch retracts the whole section: nothing stale comes back', async () => {
+  const p = await open({ mcp: { storedAt: 1e20 } }); // an absurd cache stamp must not break the page
+  try {
+    await go(p, 'messages');
+    assert.deepEqual(await groups(p), ['Acme (1)', 'Non rattachés (1)']);
+    const one = (tool, input) => input.query === 'candidature';
+    await p.page.evaluate((src) => { Object.assign(window.__fake.mcp, { mode: 'error', code: 'needs_reauth' }); window.__mcpRefetch(new Function(`return ${src}`)()); }, one.toString());
+    await go(p, 'messages', 'error');
+    assert.equal(await p.page.locator(`${body('messages')} .bubble`).count(), 0);
+    await go(p, 'planning'); // the calendar watch did not fail
+    // that watch recovers with fewer messages: what the other watches held before the denial stays retracted
+    await p.page.evaluate((src) => {
+      Object.assign(window.__fake.mcp, { mode: 'ok', emails: window.__fake.mcp.emails.filter((m) => m.id !== 'AAMk-acme-1') });
+      window.__mcpRefetch(new Function(`return ${src}`)());
+    }, one.toString());
+    await go(p, 'messages');
+    assert.deepEqual(await groups(p), ['Non rattachés (1)']);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
 test('transient error after a good delivery keeps the data with « peut-être pas à jour »', async () => {
   const p = await open({ mcp: { storedAt: Date.parse('2026-11-27T08:30:00Z') } });
   try {

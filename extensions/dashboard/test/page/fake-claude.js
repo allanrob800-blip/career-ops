@@ -39,7 +39,8 @@
  *        code is approval_required / consent_required the fake "approves" (mode becomes 'ok' and the call
  *        resolves) unless fake.mcp.deny is set.
  *   mcp.invalidate(server?, tool?, input?) -> re-delivers (setTimeout, after fake.mcp.latencyMs) to the matching live watches.
- *   window.__mcpRefetch() (test control, not part of the API) -> re-delivers to every live watch, as a poll would.
+ *   window.__mcpRefetch(only?) (test control, not part of the API) -> re-delivers to every live watch, as a poll
+ *        would; `only(tool, input)` limits it to the watches it returns true for.
  *   user: id() -> Promise<'u1'>, can(cap) -> true, canEdit() -> true, isOwner() -> true
  */
 (() => {
@@ -208,7 +209,7 @@
     if (c.storedAt != null) result.cache = { storedAt: c.storedAt, revalidating: false };
     return { result };
   }
-  const watches = new Map(); // identity -> {server, tool, key, deliver}
+  const watches = new Map(); // identity -> {server, tool, key, input, deliver}
   const mcp = Object.freeze({
     watchTool(server, tool, input, handler, opts) {
       if (typeof handler !== 'function') throw new TypeError('mcp.watchTool: handler must be a function');
@@ -220,7 +221,7 @@
         return () => { live = false; };
       }
       const w = {
-        server, tool, key,
+        server, tool, key, input: clone(input ?? {}),
         deliver() {
           if (!live) return;
           const o = outcome(server, tool);
@@ -247,7 +248,7 @@
       }
     },
   });
-  window.__mcpRefetch = () => { for (const w of [...watches.values()]) w.deliver(); };
+  window.__mcpRefetch = (only) => { for (const w of [...watches.values()]) if (!only || only(w.tool, w.input)) w.deliver(); };
   const user = Object.freeze({ id: async () => fake.user.id, can: () => true, canEdit: () => true, isOwner: () => true });
 
   window.claude = {

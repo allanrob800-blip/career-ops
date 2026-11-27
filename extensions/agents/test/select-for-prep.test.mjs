@@ -19,7 +19,7 @@ const row = (num, over = {}) => ({
 const store = (dossiers = {}) => ({ schema: 1, dossiers });
 const pick = (c) => c.num;
 
-test('selectForPrep keeps only Evaluated rows scored 4.0 or more', () => {
+test('selectForPrep keeps only Evaluated rows scored 4.0 or more, and lists no other status', () => {
   const rows = [
     row(1, { score: 4.0 }),
     row(2, { score: 3.9 }),
@@ -30,11 +30,10 @@ test('selectForPrep keeps only Evaluated rows scored 4.0 or more', () => {
   ];
   const r = selectForPrep({ rows, legitimacyByReport: new Map(), store: store(), max: 10 });
   assert.deepEqual(r.candidates.map(pick), [1]);
-  assert.deepEqual(r.skipped.map((s) => s.num), [2, 3, 4, 5, 6]);
+  assert.deepEqual(r.skipped.map((s) => s.num), [2, 3], 'Applied, SKIP and unknown-status rows are not listed');
   assert.ok(r.skipped.every((s) => typeof s.reason === 'string' && s.reason));
   assert.match(r.skipped.find((s) => s.num === 2).reason, /score/);
   assert.match(r.skipped.find((s) => s.num === 3).reason, /score/);
-  assert.match(r.skipped.find((s) => s.num === 4).reason, /Applied/);
 });
 
 test('selectForPrep candidate shape is {num, report_num, company, role, score, url}', () => {
@@ -90,7 +89,7 @@ test('selectForPrep lists skipped rows by number', () => {
   const rows = [row(8, { score: 3 }), row(9), row(2, { status: 'Applied' }), row(4), row(5), row(6)];
   const r = selectForPrep({ rows, legitimacyByReport: new Map([[9, 'Suspicious']]), store: store(), max: 2 });
   assert.deepEqual(r.candidates.map(pick), [4, 5]);
-  assert.deepEqual(r.skipped.map((x) => x.num), [2, 6, 8, 9]);
+  assert.deepEqual(r.skipped.map((x) => x.num), [6, 8, 9]);
 });
 
 test('selectLetters returns dossiers whose letter is a_completer with a filled why', () => {
@@ -118,12 +117,11 @@ test('CLI with CAREER_OPS_ROOT=<fixtures> prints a valid JSON selection', () => 
     num: 1, report_num: 1, company: 'Altair Conseil', role: 'Chef de projet data', score: 4.6,
     url: 'https://jobs.altair-conseil.example/offres/chef-de-projet-data',
   }]);
-  assert.deepEqual(out.skipped.map((s) => s.num), [2, 3, 4, 5, 6]);
+  assert.deepEqual(out.skipped.map((s) => s.num), [2, 3, 4, 6], 'row 5 (Applied) is not listed');
   assert.equal(out.skipped[0].reason, 'legitimacy Suspicious');
   assert.match(out.skipped[1].reason, /ready/);
   assert.match(out.skipped[2].reason, /score/);
-  assert.match(out.skipped[3].reason, /Applied/);
-  assert.match(out.skipped[4].reason, /report/);
+  assert.match(out.skipped[3].reason, /report/);
 });
 
 test('CLI --max 0 cuts every candidate', () => {

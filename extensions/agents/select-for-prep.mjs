@@ -18,9 +18,9 @@ export const DEFAULT_MAX = 3;
 const TIERS = ['High Confidence', 'Proceed with Caution', 'Suspicious'];
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-// Why a row is not prepared today, or null when it may be. Checks run in this order; the first that fails is reported.
+// Why an Evaluated row is not prepared today, or null when it may be. Checks run in this order; the first that
+// fails is reported.
 function exclusion(row, legitimacyByReport, dossiers) {
-  if (row.status !== 'Evaluated') return `status ${row.status || 'unknown'}, not Evaluated`;
   if (typeof row.score !== 'number' || Number.isNaN(row.score)) return 'no score';
   if (row.score < MIN_SCORE) return `score below ${MIN_SCORE.toFixed(1)}`;
   const d = dossiers[String(row.num)];
@@ -36,7 +36,8 @@ function exclusion(row, legitimacyByReport, dossiers) {
  * The offers to prepare: Evaluated rows scored ≥ 4.0, not Suspicious, with no dossier in `pret` or `a_verifier`
  * (an `a_refaire` dossier is prepared again), by score descending then number ascending, at most `max`.
  * rows: [{num, status, score: number|null, company, role, url, report_num: number|null}].
- * legitimacyByReport: Map(report_num → tier). Every row left out is in `skipped` with its reason, by number.
+ * legitimacyByReport: Map(report_num → tier). Every Evaluated row left out is in `skipped` with its reason, by
+ * number; rows of any other status are not listed at all (the daily routine reads this output).
  */
 export function selectForPrep({ rows, legitimacyByReport, store, max = DEFAULT_MAX }) {
   if (!Number.isInteger(max) || max < 0) throw new TypeError('max must be a non-negative integer');
@@ -45,6 +46,7 @@ export function selectForPrep({ rows, legitimacyByReport, store, max = DEFAULT_M
   const kept = [];
   const skipped = [];
   for (const row of rows ?? []) {
+    if (row.status !== 'Evaluated') continue;
     const reason = exclusion(row, legit, dossiers);
     if (reason) skipped.push({ num: row.num, reason });
     else kept.push(row);

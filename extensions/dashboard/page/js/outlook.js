@@ -18,7 +18,6 @@
   const REFETCH_MS = 300000;
   const LOADING_MS = 10000; // a section with no answer after this says Outlook is not answering
   const DAY_MS = 86400000;
-  const HOUR_MS = 3600000;
   const PARIS = 'Europe/Paris';
 
   // ---- failure doctrine: branch on error.code, never on the message ----
@@ -217,8 +216,17 @@
     mailAfter = new Date(Math.floor((now - 30 * DAY_MS) / DAY_MS) * DAY_MS).toISOString();
     for (const query of KEYWORDS) register('mail', MAIL, { query, afterDateTime: mailAfter, limit: LIMIT });
     registerDomains();
-    const from = Math.floor(now / HOUR_MS) * HOUR_MS;
-    register('calendar', CAL, { query: '*', afterDateTime: new Date(from).toISOString(), beforeDateTime: new Date(from + 14 * DAY_MS).toISOString(), order: 'oldest', limit: LIMIT });
+    // The calendar: from Monday 00:00 of this week (Paris), so the week's earlier interviews show, to the end of
+    // the 14th day after today. Paris midnights: the identity changes once a day, never with the hour.
+    const p = partsIn(PARIS, now);
+    const day = Date.UTC(+p.year, +p.month - 1, +p.day);
+    const monday = day - ((new Date(day).getUTCDay() + 6) % 7) * DAY_MS;
+    register('calendar', CAL, { query: '*', afterDateTime: new Date(parisMidnight(monday)).toISOString(), beforeDateTime: new Date(parisMidnight(day + 15 * DAY_MS)).toISOString(), order: 'oldest', limit: LIMIT });
+  }
+
+  // `utcDay` is a calendar day as Date.UTC(y, m, d): the instant it starts in Paris.
+  function parisMidnight(utcDay) {
+    return when({ dateTime: new Date(utcDay).toISOString().slice(0, 10) + 'T00:00:00', timeZone: PARIS }).ms;
   }
 
   // ---- derived state ----

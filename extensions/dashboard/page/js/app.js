@@ -136,8 +136,10 @@
     clearTimeout(bootTimer);
     if (reveal && stage && globalThis.CapUI && !CapUI.reduced()) {
       const done = () => html.classList.remove('cap-open');
-      stage.addEventListener('animationend', (e) => { if (e.target === stage) done(); });
-      stage.addEventListener('animationcancel', (e) => { if (e.target === stage) done(); });
+      // only the reveal's own events: lifting cap-boot cancels the CSS failsafe (cap-failsafe) on #stage too
+      const mine = (e) => e.target === stage && e.animationName === 'cap-reveal';
+      stage.addEventListener('animationend', (e) => { if (mine(e)) done(); });
+      stage.addEventListener('animationcancel', (e) => { if (mine(e)) done(); });
       setTimeout(done, 1200); // safety: never leave the class behind
       html.classList.add('cap-open');
     }

@@ -54,7 +54,8 @@ function contextOptions(device) {
  * Opens the page. Returns { page, context, errors, close }.
  * opts: { url (server url), device, theme, reducedMotion, fake, hash, now (fixed Date.now: Date|string|number),
  *         manualStart (app.js does not start CapData; the test calls CapData.start itself),
- *         init (function run in the page before its scripts, e.g. to record events) }
+ *         init (function run in the page before its scripts, e.g. to record events),
+ *         block (a URL pattern whose requests are aborted, e.g. /app\.js$/) }
  */
 export async function openPage(browser, opts) {
   const { url, device = { width: 1440, height: 900 }, theme, reducedMotion, fake, hash = '', now, manualStart, init } = opts;
@@ -66,6 +67,7 @@ export async function openPage(browser, opts) {
   await context.route(/https:\/\/fonts\.(googleapis|gstatic)\.com\//, (route) =>
     route.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   if (now != null) await context.clock.setFixedTime(new Date(now)); // timers keep running
+  if (opts.block) await context.route(opts.block, (route) => route.abort()); // e.g. a script that must not run
   await context.addInitScript({ path: FAKE_CLAUDE });
   if (manualStart) await context.addInitScript(() => { globalThis.CAP_MANUAL_START = true; });
   if (fake) await context.addInitScript((f) => { Object.assign(window.__fake, f); }, fake);

@@ -622,8 +622,10 @@ table.apps { width: 100%; border-collapse: collapse; }
 
 /* ---------- opening: circular reveal of #stage and a blur lift of #main (both wrappers have no backdrop-filter) ---------- */
 @media (prefers-reduced-motion: no-preference) {
-  :root.cap-boot:not([data-motion=reduce]) #stage { clip-path: circle(0% at 50% 38%); }
+  /* failsafe: if app.js never runs, the hidden stage still shows itself after 1.5 s (app.js lifts cap-boot sooner) */
+  :root.cap-boot:not([data-motion=reduce]) #stage { clip-path: circle(0% at 50% 38%); animation: cap-failsafe 0s 1.5s both; }
 }
+@keyframes cap-failsafe { to { clip-path: none; } }
 .cap-open #stage { animation: cap-reveal .76s cubic-bezier(.65,0,.35,1) both; }
 .cap-open #main { animation: cap-unblur .6s cubic-bezier(.2,.8,.2,1) .12s both; }
 @keyframes cap-reveal { from { clip-path: circle(0% at 50% 38%); } to { clip-path: circle(150% at 50% 38%); } }

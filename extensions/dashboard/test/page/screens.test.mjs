@@ -173,6 +173,8 @@ test('Analytique: period toggle redraws the curve; funnel, donut, response rate'
     const dAll = await d();
     assert.ok(d7 && dAll && d7 !== dAll);
     assert.equal(await p.page.locator('[data-period="all"]').getAttribute('aria-pressed'), 'true');
+    // the timeline holds 180 days: the widest period says so
+    assert.deepEqual(await p.page.locator('[data-period]').allInnerTexts(), ['7 j', '30 j', '6 mois']);
     assert.equal(await p.page.locator('.funnel-row').count(), 5);
     assert.ok(await p.page.locator('#status-donut path').count() >= 3);
     await p.page.waitForFunction(() => document.getElementById('rate-big')?.textContent.replace(/\s/g, '') === '50%');

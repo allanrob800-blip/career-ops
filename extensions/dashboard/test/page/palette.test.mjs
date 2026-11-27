@@ -452,6 +452,17 @@ test('no database answer: the page stops waiting and shows itself without the re
   } finally { await p.close(); }
 });
 
+test('CSS failsafe: when app.js never runs, the page still shows itself after about 1.5 s', async () => {
+  const p = await open({ reducedMotion: false, block: /\/js\/app\.js$/ });
+  try {
+    const clip = () => p.page.evaluate(() => getComputedStyle(document.getElementById('stage')).clipPath);
+    assert.equal(await p.page.evaluate(() => typeof globalThis.CapApp), 'undefined');
+    assert.equal(await p.page.evaluate(() => document.documentElement.classList.contains('cap-boot')), true);
+    assert.match(await clip(), /^circle\(0/);
+    await p.page.waitForFunction(() => getComputedStyle(document.getElementById('stage')).clipPath === 'none', null, { timeout: 2500 });
+  } finally { await p.close(); }
+});
+
 test('« Plus » sheet: modal dialog, Tab stays inside, Escape closes and returns to the button', async () => {
   const p = await open({ device: 'iPhone 15 Pro Max' });
   try {

@@ -414,7 +414,8 @@ test('only the two read tools are watched, once per identity, with the documente
       assert.ok(!(i.query && i.sender));
     }
     const cal = calls.filter((c) => c.args[1] === 'outlook_calendar_search').map((c) => c.args[2]);
-    assert.deepEqual(cal, [{ query: '*', afterDateTime: '2026-11-27T09:00:00.000Z', beforeDateTime: '2026-12-11T09:00:00.000Z', order: 'oldest', limit: 25 }]);
+    // Monday 00:00 of this week in Paris, to the end of the 14th day after today (Paris): stable all day long
+    assert.deepEqual(cal, [{ query: '*', afterDateTime: '2026-11-22T23:00:00.000Z', beforeDateTime: '2026-12-11T23:00:00.000Z', order: 'oldest', limit: 25 }]);
     assert.deepEqual(p.errors, []);
   } finally { await p.close(); }
 });
@@ -583,4 +584,21 @@ test('an Outlook section still loading 10 s after start says « Outlook ne répo
     assert.equal(await p.page.evaluate(() => CapOutlook.getState().mail.status), 'ok');
     assert.deepEqual(p.errors, []);
   } finally { await p.close(); }
+});
+
+test('calendar window across a daylight-saving change: Monday 00:00 and the horizon are Paris midnights', async () => {
+  for (const [now, after, beforeAt] of [
+    ['2026-03-29T12:00:00+02:00', '2026-03-22T23:00:00.000Z', '2026-04-12T22:00:00.000Z'], // Sunday of the switch
+    ['2026-03-30T08:00:00+02:00', '2026-03-29T22:00:00.000Z', '2026-04-13T22:00:00.000Z'], // the Monday after
+    ['2026-11-27T23:59:00+01:00', '2026-11-22T23:00:00.000Z', '2026-12-11T23:00:00.000Z'], // late Friday: same as the morning
+  ]) {
+    const p = await open({ now });
+    try {
+      await go(p, 'planning');
+      const cal = (await mcpCalls(p)).filter((c) => c.args[1] === 'outlook_calendar_search').map((c) => c.args[2]);
+      assert.equal(cal.length, 1, now);
+      assert.equal(cal[0].afterDateTime, after, now);
+      assert.equal(cal[0].beforeDateTime, beforeAt, now);
+    } finally { await p.close(); }
+  }
 });

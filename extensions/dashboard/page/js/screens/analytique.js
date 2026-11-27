@@ -1,4 +1,4 @@
-/* Analytique: timeline area chart (7 j / 30 j / Tout), funnel, status donut, response rate, in-progress list. */
+/* Analytique: timeline area chart (7 j / 30 j / 6 mois), funnel, status donut, response rate, in-progress list. */
 (() => {
   'use strict';
   const Screens = (globalThis.Screens = globalThis.Screens || {});
@@ -14,7 +14,7 @@
   ];
   const STAGE = { Applied: 25, Responded: 45, Assessment: 60, Interview: 75, Offer: 95 };
 
-  // Period view of the 180-day timeline: daily for 7/30 days, weekly for « Tout ».
+  // Period view of the 180-day timeline: daily for 7/30 days, weekly for « 6 mois ».
   function periodData(tl, period) {
     if (period !== 'all') {
       const d = tl.slice(-Number(period));
@@ -76,7 +76,7 @@
     root.innerHTML = `<div class="ana">
       <section class="card glass ana-time rise" style="--i:0" aria-labelledby="t-time">
         <div class="card-head"><div><h2 id="t-time" class="card-title">Candidatures dans le temps</h2><p class="muted small" id="timeline-sum"></p></div>
-          <div class="seg" role="group" aria-label="Période"><button type="button" data-period="7">7 j</button><button type="button" data-period="30">30 j</button><button type="button" data-period="all">Tout</button></div></div>
+          <div class="seg" role="group" aria-label="Période"><button type="button" data-period="7">7 j</button><button type="button" data-period="30">30 j</button><button type="button" data-period="all">6 mois</button></div></div>
         <ul class="legend"><li><i class="sw sw-main" aria-hidden="true"></i>Envoyées</li><li><i class="sw sw-alt" aria-hidden="true"></i>Évaluées</li></ul>
         <div class="fig fig-area"><svg id="timeline-chart" role="img" aria-label="Candidatures envoyées et offres évaluées sur la période"></svg></div>
         <details class="data-view"><summary>Voir les données</summary><div class="scroll" id="timeline-table"></div></details>

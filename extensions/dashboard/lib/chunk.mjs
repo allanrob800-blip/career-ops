@@ -1,6 +1,6 @@
 // Splits a snapshot into database documents, each under maxBytes of JSON, and plans the db_write calls of a sync.
 const META_KEYS = ['schema', 'generation', 'generated_at', 'profile', 'stats', 'timeline', 'followups_due', 'companies'];
-const ARRAYS = ['apps', 'offers', 'reports'];
+const ARRAYS = ['apps', 'offers', 'reports', 'proposals'];
 const META = 'snapshot/meta';
 const MAX_OPS = 50; // db_write: 1 to 50 ops per call
 

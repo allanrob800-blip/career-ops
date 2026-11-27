@@ -1,0 +1,12 @@
+{
+  "titre_cv": "Product Manager",
+  "angle": "Chef de produit qui relie les besoins des clients et l'équipe technique.",
+  "lettre_angle": null,
+  "preuves": [
+    { "texte": "Lancement d'une application interne utilisée par trois équipes", "source": "cv.md › expérience la plus récente" }
+  ],
+  "mots_cles_repris": ["roadmap", "discovery"],
+  "mots_cles_ecartes": [ { "mot": "SAFe", "raison": "absent de cv.md" } ],
+  "ecarts": [ { "exigence": "Anglais courant", "traitement": "non revendiqué, niveau indiqué tel quel" } ],
+  "verification": { "ok": true, "reasons": [] }
+}

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "generated_at": "2026-11-27T07:00:00Z",
+  "items": [
+    { "id": "p-0a1b2c3d4e5f6071", "ref": 3, "to_status": "Applied",
+      "evidence": { "from": "rh@cobalt.example", "date": "2026-11-24T09:00:00Z", "subject": "Accusé de réception", "excerpt": "Nous avons bien reçu votre candidature." } },
+    { "id": "p-1a1b2c3d4e5f6071", "ref": 42, "to_status": "Interview",
+      "evidence": { "from": "rh@inconnue.example", "date": "2026-11-25T09:00:00Z", "subject": "Entretien", "excerpt": "Candidature absente du tracker." } },
+    { "id": "not-an-id", "ref": 4, "to_status": "Interview",
+      "evidence": { "from": "rh@delta.example", "date": "2026-11-25T09:00:00Z", "subject": "Entretien", "excerpt": "Identifiant invalide." } }
+  ]
+}

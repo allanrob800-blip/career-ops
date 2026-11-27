@@ -41,6 +41,8 @@ Claude fait les deux étapes dans cet ordre. Un seul `db_write` à la fois, et 2
    - puis un lot qui bascule `snapshot/meta` (`set` avec `ifVersion`) et supprime les anciennes parties (`delete` avec `ifVersion`) ;
    - les suppressions en trop éventuelles suivent, après la bascule.
 
+Outre le tracker et ses fichiers voisins, `export.mjs` lit sous la racine des données `data/dossiers.json` (le dossier de chaque candidature préparée, avec sa fiche stratégie `output/…-strategie.json`, lue seulement si elle est un fichier de la racine des données), `data/proposals.json` (statuts proposés par l'agent Suivi, partie `snapshot/proposals-…`) et `data/relances.json` (texte de relance, champ `text` de `followups_due`). Un fichier absent ne donne rien ; un fichier illisible est signalé sur la sortie d'erreur et ignoré, sans bloquer l'instantané.
+
 Si la synchronisation s'arrête en route, la génération précédente reste entière dans la base, et la page continue de l'afficher. Si la base ne contient qu'une `snapshot/meta` dont les parties manquent, la page l'indique (« Synchronisation incomplète — les données seront rétablies à la prochaine session ») : refaire l'étape 2.
 
 `node extensions/dashboard/export.mjs` sans option affiche `{"docs": […]}` ; `--summary` donne la taille de chaque document.

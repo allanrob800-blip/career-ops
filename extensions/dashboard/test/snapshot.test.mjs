@@ -226,3 +226,135 @@ test('cv_pages: pages without a valid PDF asset id still show; stale is computed
   assert.deepEqual([by(3).cv_url, by(3).cv_pages, by(3).cv_stale], [null, [`/_blob/${P1}`], true]);
   assert.deepEqual([by(4).cv_url, by(4).cv_pages, by(4).cv_stale], [null, [`/_blob/${P2}`], true]);
 });
+
+// ---- Dossiers: data/dossiers.json + strategy sheets + letter assets -> apps[i].dossier ----
+const DOSSIER = (over = {}) => ({
+  state: 'pret',
+  prepared_at: '2026-11-26T07:55:00Z',
+  report_num: 3,
+  cv: { pdf: 'output/003-cobalt-cv.pdf', html: 'output/003-cobalt-cv.html' },
+  letter: { state: 'a_completer', why: null, why_at: null, pdf: null },
+  message: 'Bonjour, je vous propose ma candidature.',
+  answers: [{ q: 'Disponibilité ?', a: 'Sous un mois.' }],
+  strategy: 'output/003-cobalt-strategie.json',
+  check: { ok: true, reasons: [] },
+  retouches: [],
+  ...over,
+});
+const SHEET = (over = {}) => ({
+  titre_cv: 'Engineering Manager',
+  angle: 'Mener des équipes plateforme.',
+  lettre_angle: null,
+  preuves: [{ texte: 'Équipe de six personnes', source: 'cv.md › expérience' }],
+  mots_cles_repris: ['plateforme'],
+  mots_cles_ecartes: [{ mot: 'Kubernetes', raison: 'absent de cv.md' }],
+  ecarts: [{ exigence: 'Anglais courant', traitement: 'non revendiqué' }],
+  verification: { ok: true, reasons: [] },
+  ...over,
+});
+const withDossiers = (dossiers, extra = {}) => ({ ...loadFixtureInput(NOW), dossiers: { schema: 1, dossiers }, ...extra });
+
+test('dossier: a valid dossier gives its fields and its bounded strategy sheet', () => {
+  const s = buildSnapshot(withDossiers({ 3: DOSSIER() }, { strategies: { 3: SHEET() } }));
+  const d = s.apps.find((a) => a.num === 3).dossier;
+  assert.equal(d.strategy.titre_cv, 'Engineering Manager');
+  assert.deepEqual(d.strategy.preuves, [{ texte: 'Équipe de six personnes', source: 'cv.md › expérience' }]);
+  assert.deepEqual(
+    [d.state, d.prepared_at, d.letter_state, d.has_why, d.message, d.answers, d.check_ok, d.check_reasons, d.retouche_pending],
+    ['pret', '2026-11-26T07:55:00Z', 'a_completer', false, 'Bonjour, je vous propose ma candidature.', [{ q: 'Disponibilité ?', a: 'Sous un mois.' }], true, [], false],
+  );
+  assert.deepEqual([d.letter_url, d.letter_pages, d.letter_stale], [null, [], null]);
+  assert.ok(s.apps.filter((a) => a.num !== 3).every((a) => a.dossier === null));
+});
+
+test('dossier: a sheet field of 5000 characters is bounded to 600', () => {
+  const s = buildSnapshot(withDossiers({ 3: DOSSIER() }, { strategies: { 3: SHEET({ angle: 'x'.repeat(5000) }) } }));
+  assert.equal([...s.apps.find((a) => a.num === 3).dossier.strategy.angle].length, 600);
+});
+
+test('dossier: no sheet, or a sheet that is not an object, gives strategy null', () => {
+  for (const strategies of [undefined, {}, { 3: null }, { 3: 'x' }, { 3: [] }]) {
+    const d = buildSnapshot(withDossiers({ 3: DOSSIER() }, { strategies })).apps.find((a) => a.num === 3).dossier;
+    assert.equal(d.strategy, null, JSON.stringify(strategies));
+    assert.equal(d.state, 'pret');
+  }
+});
+
+test('dossier: a num absent from the tracker is ignored; an invalid dossier gives null', () => {
+  const s = buildSnapshot(withDossiers({ 42: DOSSIER(), 4: DOSSIER({ state: 'bogus' }), 5: 'x' }, { strategies: { 42: SHEET() } }));
+  assert.equal(s.apps.length, 8);
+  assert.equal(s.apps.find((a) => a.num === 42), undefined);
+  assert.ok(s.apps.every((a) => a.dossier === null));
+  for (const dossiers of [undefined, null, 'x', { schema: 1 }, { schema: 1, dossiers: [] }]) {
+    const input = { ...loadFixtureInput(NOW), dossiers };
+    assert.ok(buildSnapshot(input).apps.every((a) => a.dossier === null), JSON.stringify(dossiers));
+  }
+});
+
+test('dossier: has_why, letter_state, retouche_pending, check reasons; answers capped at 20', () => {
+  const answers = Array.from({ length: 25 }, (_, i) => ({ q: `Question ${i} ?`, a: `Réponse ${i}.` }));
+  const s = buildSnapshot(withDossiers({
+    3: DOSSIER({ letter: { state: 'prete', why: 'Leur produit plateforme.', why_at: '2026-11-26T20:00:00Z', pdf: 'output/003-lettre.pdf' }, answers }),
+    4: DOSSIER({ state: 'a_refaire', letter: { state: 'a_completer', why: '   ', why_at: null, pdf: null },
+      check: { ok: false, reasons: ['mot-clé absent du CV : « roadmap »'] },
+      retouches: [{ text: 'Plus court.', at: '2026-11-25T10:00:00Z', done_at: '2026-11-26T07:00:00Z' }, { text: 'Titre.', at: '2026-11-26T10:00:00Z', done_at: null }] }),
+    5: DOSSIER({ retouches: [{ text: 'Plus court.', at: '2026-11-25T10:00:00Z', done_at: '2026-11-26T07:00:00Z' }] }),
+  }));
+  const by = (n) => s.apps.find((a) => a.num === n).dossier;
+  assert.deepEqual([by(3).letter_state, by(3).has_why, by(3).answers.length, by(3).answers[19].q], ['prete', true, 20, 'Question 19 ?']);
+  assert.deepEqual([by(4).state, by(4).has_why, by(4).retouche_pending, by(4).check_ok, by(4).check_reasons],
+    ['a_refaire', false, true, false, ['mot-clé absent du CV : « roadmap »']]);
+  assert.equal(by(5).retouche_pending, false);
+});
+
+// letter_url / letter_pages / letter_stale follow the cv_url / cv_pages / cv_stale rules, from the letter_* fields.
+test('dossier: letter_url, letter_pages and letter_stale follow the CV rules; CV fields untouched', () => {
+  const input = withDossiers({ 1: DOSSIER({ report_num: 1 }), 3: DOSSIER(), 4: DOSSIER(), 5: DOSSIER() });
+  input.dashboardJson = dash({
+    3: { asset_id: ID, file: 'output/c.pdf', sha256: SHA, pages: [P1],
+      letter_asset_id: ID, letter_file: 'output/l3.pdf', letter_sha256: SHA, letter_pages: [P2, 'javascript:alert(1)'] },
+    4: { letter_asset_id: 'javascript:alert(1)', letter_file: 'output/l4.pdf', letter_sha256: SHA, letter_pages: [P1] },
+    5: { letter_asset_id: ID, letter_file: 'output/l5.pdf', letter_sha256: SHA.toUpperCase() },
+  });
+  input.cvFileHashes = { 'output/c.pdf': SHA, 'output/l3.pdf': 'bb'.repeat(32), 'output/l4.pdf': SHA, 'output/l5.pdf': SHA };
+  const s = buildSnapshot(input);
+  const by = (n) => s.apps.find((a) => a.num === n);
+  assert.deepEqual([by(3).dossier.letter_url, by(3).dossier.letter_pages, by(3).dossier.letter_stale], [`/_blob/${ID}`, [`/_blob/${P2}`], true]);
+  assert.deepEqual([by(3).cv_url, by(3).cv_pages, by(3).cv_stale], [`/_blob/${ID}`, [`/_blob/${P1}`], false]);
+  assert.deepEqual([by(4).dossier.letter_url, by(4).dossier.letter_pages, by(4).dossier.letter_stale], [null, [`/_blob/${P1}`], false]);
+  assert.deepEqual([by(4).cv_url, by(4).cv_pages, by(4).cv_stale], [null, [], null]);
+  assert.deepEqual([by(5).dossier.letter_url, by(5).dossier.letter_stale], [`/_blob/${ID}`, false]);
+  assert.deepEqual([by(1).dossier.letter_url, by(1).dossier.letter_pages, by(1).dossier.letter_stale], [null, [], null]);
+});
+
+// ---- Proposals (data/proposals.json) and follow-up texts (data/relances.json) ----
+const PROPOSAL = (over = {}) => ({
+  id: 'p-0123456789abcdef', ref: 3, to_status: 'Interview',
+  evidence: { from: 'rh@cobalt.example', date: '2026-11-26T09:12:00Z', subject: 'Entretien', excerpt: 'Seriez-vous disponible ?' },
+  ...over,
+});
+
+test('proposals: kept when ref is in the tracker and differs from its current status', () => {
+  const input = { ...loadFixtureInput(NOW), proposals: [
+    PROPOSAL(),
+    PROPOSAL({ id: 'p-1111111111111111', ref: 2, to_status: 'Applied' }), // already Applied
+    PROPOSAL({ id: 'p-2222222222222222', ref: 42 }), // not in the tracker
+    PROPOSAL({ id: 'p-3333333333333333', ref: 7, to_status: 'Interview' }),
+  ] };
+  const s = buildSnapshot(input);
+  assert.deepEqual(s.proposals, [
+    { id: 'p-0123456789abcdef', ref: 3, company: 'Cobalt SAS', from_status: 'Applied', to_status: 'Interview', evidence: PROPOSAL().evidence },
+    { id: 'p-3333333333333333', ref: 7, company: 'Gamma Corp', from_status: 'Rejected', to_status: 'Interview', evidence: PROPOSAL().evidence },
+  ]);
+  for (const proposals of [undefined, null, 'x', {}]) assert.deepEqual(buildSnapshot({ ...loadFixtureInput(NOW), proposals }).proposals, []);
+});
+
+test('followups_due: text present when relances gives one for that num, absent otherwise', () => {
+  const plain = buildSnapshot(loadFixtureInput(NOW));
+  assert.ok(plain.followups_due.length >= 1);
+  assert.ok(plain.followups_due.every((f) => !('text' in f)));
+  const s = buildSnapshot({ ...loadFixtureInput(NOW), relances: { 2: { text: 'Bonjour,\n\nJe me permets de revenir vers vous.' }, 7: { text: 'Pas due.' } } });
+  assert.equal(s.followups_due.find((f) => f.num === 2).text, 'Bonjour,\n\nJe me permets de revenir vers vous.');
+  assert.ok(s.followups_due.filter((f) => f.num !== 2).every((f) => !('text' in f)));
+  assert.deepEqual(s.followups_due.map((f) => f.num), plain.followups_due.map((f) => f.num)); // a text never makes a follow-up due
+});

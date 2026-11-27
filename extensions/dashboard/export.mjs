@@ -8,27 +8,69 @@ import { createHash } from 'node:crypto';
 import { getCareerOpsRoot, resolveTrackerPath, getProfilePath } from '../../path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, extractTrackerReportNumbers } from '../../tracker-parse.mjs';
 import { buildSnapshot, parseCvAssets } from './lib/snapshot.mjs';
+import { readDossiers, validateDossier } from '../agents/lib/dossiers.mjs';
+import { validateProposals, validateRelances } from '../agents/lib/suivi-files.mjs';
 import { toDocs, syncPlan } from './lib/chunk.mjs';
 import { parseDbLines } from './lib/db-lines.mjs';
 
 const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '');
 
-// Current sha256 of each CV file recorded in data/dashboard.json that exists under the data root, keyed by the
-// recorded `file`. A path that leaves the data root, or is not a regular file, is not hashed (cv_stale stays null).
+const warn = (msg) => process.stderr.write(`export: ${msg}\n`);
+
+// The absolute path of `file` (data-root relative) when it resolves inside the data root and is a regular file,
+// else null.
+function fileInRoot(root, file) {
+  if (typeof file !== 'string' || !file) return null;
+  const abs = resolve(root, file);
+  const rel = relative(root, abs);
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null;
+  try { return statSync(abs).isFile() ? abs : null; } catch { return null; }
+}
+
+// Current sha256 of each CV and letter file recorded in data/dashboard.json that exists under the data root, keyed
+// by the recorded `file` / `letter_file`. A path that leaves the data root, or is not a regular file, is not hashed
+// (cv_stale / letter_stale stay null).
 function cvFileHashes(root, dashboardJson) {
   const out = {};
   for (const entry of Object.values(parseCvAssets(dashboardJson))) {
-    const file = entry.file;
-    if (typeof file !== 'string' || !file || Object.hasOwn(out, file)) continue;
-    const abs = resolve(root, file);
-    const rel = relative(root, abs);
-    if (!rel || rel.startsWith('..') || isAbsolute(rel)) continue;
-    try {
-      if (!statSync(abs).isFile()) continue;
-      out[file] = createHash('sha256').update(readFileSync(abs)).digest('hex');
-    } catch { /* unreadable: unknown */ }
+    for (const file of [entry.file, entry.letter_file]) {
+      if (typeof file !== 'string' || Object.hasOwn(out, file)) continue;
+      const abs = fileInRoot(root, file);
+      if (!abs) continue;
+      try { out[file] = createHash('sha256').update(readFileSync(abs)).digest('hex'); } catch { /* unreadable: unknown */ }
+    }
   }
   return out;
+}
+
+// data/<name> parsed and validated by `validate`; absent: `empty`; invalid JSON or shape: a warning and `empty`.
+function readSuiviFile(root, name, validate, empty) {
+  const p = join(root, 'data', name);
+  if (!existsSync(p)) return empty;
+  try { return validate(JSON.parse(readFileSync(p, 'utf8'))); } catch (e) {
+    warn(`data/${name} ignored: ${e.message}`);
+    return empty;
+  }
+}
+
+// The dossier store (data/dossiers.json) and the strategy sheet of each valid dossier ({num: parsed JSON}). A store
+// that cannot be read gives a warning and no dossier. A sheet is read only from a regular file inside the data root;
+// one that is not valid JSON gives a warning and no sheet.
+function dossiersAndSheets(root) {
+  let store;
+  try { store = readDossiers(root); } catch (e) {
+    warn(`data/dossiers.json ignored: ${e.message}`);
+    return { dossiers: { schema: 1, dossiers: {} }, strategies: {} };
+  }
+  const strategies = {};
+  for (const [num, d] of Object.entries(store.dossiers)) {
+    const abs = validateDossier(d) === null ? fileInRoot(root, d.strategy) : null;
+    if (!abs) continue;
+    try { strategies[num] = JSON.parse(readFileSync(abs, 'utf8')); } catch (e) {
+      warn(`strategy sheet ${d.strategy} ignored: ${e.message}`);
+    }
+  }
+  return { dossiers: store, strategies };
 }
 
 export function collectInput(now = new Date()) {
@@ -63,6 +105,9 @@ export function collectInput(now = new Date()) {
     profileYaml: read(getProfilePath(root)),
     dashboardJson,
     cvFileHashes: cvFileHashes(root, dashboardJson),
+    ...dossiersAndSheets(root),
+    proposals: readSuiviFile(root, 'proposals.json', validateProposals, []),
+    relances: readSuiviFile(root, 'relances.json', validateRelances, {}),
     now,
   };
 }

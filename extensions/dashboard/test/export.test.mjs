@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync, mkdtempSync, writeFileSync, rmSync, cpSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -133,3 +133,106 @@ test('export CLI: the fixture root links app 1 to its fictional CV asset', () =>
   assert.deepEqual(items.find((x) => x.num === 1).cv_pages, ['/_blob/0123456789abcdef0123456789abcd01', '/_blob/0123456789abcdef0123456789abcd02']);
   assert.deepEqual(items.find((x) => x.num === 8).cv_pages, []); // hostile page ids dropped
 });
+
+// ---- Dossiers, strategy sheets, letters, proposals and follow-up texts (data/*.json, output/*-strategie.json) ----
+const exportAt = (root) => {
+  const r = spawnSync('node', ['extensions/dashboard/export.mjs'], {
+    cwd: REPO, encoding: 'utf8',
+    env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: '' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const { docs } = JSON.parse(r.stdout);
+  const items = (kind) => docs.filter((d) => d.path.startsWith(`snapshot/${kind}-`)).flatMap((d) => d.data.items);
+  return {
+    stderr: r.stderr,
+    apps: Object.fromEntries(items('apps').map((a) => [a.num, a])),
+    proposals: items('proposals'),
+    meta: docs.find((d) => d.path === 'snapshot/meta').data,
+  };
+};
+const LETTER = 'f00dfeed0123456789abcdef0123lt01';
+const readJson = (root, rel) => JSON.parse(readFileSync(join(root, rel), 'utf8'));
+const writeJson = (root, rel, v) => writeFileSync(join(root, rel), JSON.stringify(v));
+
+test('export CLI: the fixture root gives app 1 its dossier and strategy, quietly', () => {
+  const r = exportAt(FIXTURE_ROOT);
+  assert.equal(r.stderr, '');
+  const d = r.apps[1].dossier;
+  assert.equal(d.strategy.titre_cv, 'Product Manager');
+  assert.deepEqual([d.state, d.letter_state, d.has_why, d.check_ok, d.retouche_pending], ['pret', 'a_completer', false, true, false]);
+  assert.equal(r.apps[6].dossier.strategy, null); // its sheet file does not exist
+  assert.equal(r.apps[6].dossier.state, 'a_verifier');
+  assert.ok([2, 3, 4, 5, 7, 8].every((n) => r.apps[n].dossier === null));
+  assert.deepEqual(r.proposals, []); // same status, unknown ref, invalid id
+  assert.match(r.meta.followups_due.find((f) => f.num === 2).text, /^Bonjour,\n\nJe me permets/);
+});
+
+test('export CLI: a proposal whose status differs is exported with its company and current status', () => withRoot((root) => {
+  const doc = readJson(root, 'data/proposals.json');
+  doc.items.push({ id: 'p-2a1b2c3d4e5f6071', ref: 6, to_status: 'Offer',
+    evidence: { from: 'rh@foxtrot.example', date: '2026-11-27T08:00:00Z', subject: 'Proposition', excerpt: 'Nous avons le plaisir de vous faire une offre.' } });
+  writeJson(root, 'data/proposals.json', doc);
+  const r = exportAt(root);
+  assert.deepEqual(r.proposals, [{ id: 'p-2a1b2c3d4e5f6071', ref: 6, company: 'Foxtrot', from_status: 'Interview', to_status: 'Offer',
+    evidence: { from: 'rh@foxtrot.example', date: '2026-11-27T08:00:00Z', subject: 'Proposition', excerpt: 'Nous avons le plaisir de vous faire une offre.' } }]);
+  assert.ok(r.meta.parts.some((p) => p.startsWith('snapshot/proposals-')));
+}));
+
+test('export CLI: a corrupted dossiers.json does not stop the export (stderr warning, dossier null)', () => withRoot((root) => {
+  writeFileSync(join(root, 'data', 'dossiers.json'), '{"schema": 1, "dossiers": {"1": ');
+  const r = exportAt(root);
+  assert.match(r.stderr, /dossiers\.json/);
+  assert.equal(Object.keys(r.apps).length, 8);
+  assert.ok(Object.values(r.apps).every((a) => a.dossier === null));
+}));
+
+test('export CLI: invalid proposals, relances or strategy files warn and give empty values', () => withRoot((root) => {
+  writeFileSync(join(root, 'data', 'proposals.json'), '[not json');
+  writeJson(root, 'data/relances.json', { schema: 1, items: [] });
+  writeFileSync(join(root, 'output', '001-acme-strategie.json'), '{"titre_cv": ');
+  const r = exportAt(root);
+  assert.match(r.stderr, /proposals\.json/);
+  assert.match(r.stderr, /relances\.json/);
+  assert.match(r.stderr, /001-acme-strategie\.json/);
+  assert.deepEqual(r.proposals, []);
+  assert.ok(r.meta.followups_due.every((f) => !('text' in f)));
+  assert.equal(r.apps[1].dossier.strategy, null);
+  assert.equal(r.apps[1].dossier.state, 'pret');
+}));
+
+test('export CLI: absent dossiers, proposals and relances files give empty values, no warning', () => withRoot((root) => {
+  for (const f of ['dossiers.json', 'proposals.json', 'relances.json']) rmSync(join(root, 'data', f));
+  const r = exportAt(root);
+  assert.equal(r.stderr, '');
+  assert.ok(Object.values(r.apps).every((a) => a.dossier === null));
+  assert.deepEqual(r.proposals, []);
+  assert.ok(r.meta.followups_due.every((f) => !('text' in f)));
+}));
+
+test('export CLI: a strategy path that is not a regular file is not read', () => withRoot((root) => {
+  mkdirSync(join(root, 'output', '006-foxtrot-strategie.json'));
+  const r = exportAt(root);
+  assert.equal(r.stderr, '');
+  assert.equal(r.apps[6].dossier.strategy, null);
+}));
+
+test('export CLI: letter_stale is true when the letter PDF changed since its upload', () => withRoot((root, dir) => {
+  writeFileSync(join(root, 'output', '001-acme-lettre.pdf'), '%PDF-1.4 fictional letter, regenerated');
+  writeFileSync(join(root, 'output', '006-foxtrot-lettre.pdf'), '%PDF-1.4 fictional foxtrot letter');
+  writeFileSync(join(dir, 'outside.pdf'), '%PDF-1.4 fictional foxtrot letter');
+  const dash = readJson(root, 'data/dashboard.json');
+  Object.assign(dash.cv_assets['1'], { letter_asset_id: LETTER, letter_file: 'output/001-acme-lettre.pdf',
+    letter_sha256: sha('%PDF-1.4 fictional letter'), letter_pages: [PAGE] });
+  dash.cv_assets['6'] = { letter_asset_id: LETTER, letter_file: 'output/006-foxtrot-lettre.pdf', letter_sha256: sha('%PDF-1.4 fictional foxtrot letter'), letter_pages: [PAGE] };
+  writeJson(root, 'data/dashboard.json', dash);
+  const before = hashTree(root);
+  const r = exportAt(root);
+  assert.equal(hashTree(root), before, 'export stays read-only');
+  const d1 = r.apps[1].dossier;
+  assert.deepEqual([d1.letter_url, d1.letter_pages, d1.letter_stale], [`/_blob/${LETTER}`, [`/_blob/${PAGE}`], true]);
+  assert.equal(r.apps[1].cv_url, '/_blob/0123456789abcdef0123456789abcdef');
+  assert.equal(r.apps[6].dossier.letter_stale, false);
+  dash.cv_assets['6'].letter_file = '../outside.pdf';
+  writeJson(root, 'data/dashboard.json', dash);
+  assert.equal(exportAt(root).apps[6].dossier.letter_stale, null); // outside the data root: never hashed
+}));

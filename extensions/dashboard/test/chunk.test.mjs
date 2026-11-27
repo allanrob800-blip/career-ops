@@ -5,7 +5,7 @@ import { parseDbLines } from '../lib/db-lines.mjs';
 
 const size = (d) => Buffer.byteLength(JSON.stringify(d));
 
-function fakeSnapshot({ apps = 0, offers = 0, reports = 0 } = {}) {
+function fakeSnapshot({ apps = 0, offers = 0, reports = 0, proposals = 0 } = {}) {
   const mk = (n, label) => Array.from({ length: n }, (_, i) => ({ num: i, label, note: 'x'.repeat(200) }));
   return {
     schema: 1,
@@ -19,6 +19,7 @@ function fakeSnapshot({ apps = 0, offers = 0, reports = 0 } = {}) {
     apps: mk(apps, 'a'),
     offers: mk(offers, 'o'),
     reports: mk(reports, 'r'),
+    proposals: mk(proposals, 'p'),
   };
 }
 
@@ -126,4 +127,23 @@ test('parseDbLines: tool line format, wrapper lines ignored; a JSON array passes
   const wrapped = '{"count":2,"nextCursor":""}\n<untrusted-document-ab12>{"id":"meta","data":{},"version":2}\n{"id":"apps-g1-0","tooLarge":true,"version":5}</untrusted-document-ab12>\n';
   assert.deepEqual(parseDbLines(wrapped).map((e) => [e.id, e.version]), [['meta', 2], ['apps-g1-0', 5]]);
   assert.deepEqual(parseDbLines(''), []);
+});
+
+test('toDocs splits proposals into parts like the other arrays; syncPlan writes them before the meta flip', () => {
+  const s = fakeSnapshot({ apps: 2, proposals: 400 });
+  const docs = toDocs(s);
+  assert.ok(docs.every((d) => size(d.data) <= 60000));
+  const parts = docs.filter((d) => d.path.startsWith('snapshot/proposals-'));
+  assert.ok(parts.length >= 2);
+  assert.ok(parts.every((d, i) => d.path === `snapshot/proposals-g20261127T100000000Z-${i}` && d.data.generation === s.generation));
+  assert.deepEqual(parts.flatMap((d) => d.data.items).map((p) => p.num), s.proposals.map((p) => p.num));
+  const meta = docs[0].data;
+  assert.equal('proposals' in meta, false);
+  for (const p of parts) assert.ok(meta.parts.includes(p.path));
+  const { batches } = syncPlan(docs, [cur('snapshot/meta', 3, { parts: ['snapshot/proposals-g0-0'] }), cur('snapshot/proposals-g0-0', 1)]);
+  const flat = batches.flat();
+  const metaAt = flat.findIndex((o) => o.path === 'snapshot/meta');
+  for (const p of parts) assert.ok(flat.slice(0, metaAt).some((o) => o.op === 'set' && o.path === p.path), p.path);
+  assert.deepEqual(flat.slice(metaAt + 1), [{ op: 'delete', path: 'snapshot/proposals-g0-0', ifVersion: 1 }]);
+  assert.equal(toDocs(fakeSnapshot({ apps: 1 })).some((d) => d.path.startsWith('snapshot/proposals-')), false);
 });

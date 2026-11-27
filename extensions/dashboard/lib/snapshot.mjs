@@ -12,6 +12,8 @@ import { closeDatesByUrl, closeDateForUrl } from '../../../lib/posting-close.mjs
 import { loadYaml } from '../../../lib/yaml-document.mjs';
 import { isAggregatorUrl } from '../../../url-key.mjs';
 import { summarizeReport } from './report-summary.mjs';
+import { validateDossier } from '../../agents/lib/dossiers.mjs';
+import { validateSheet } from '../../agents/check-strategy.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TZ = 'Europe/Paris';
@@ -57,20 +59,56 @@ export function parseCvAssets(text) {
 }
 
 const CV_PAGES_MAX = 6;
+const ANSWERS_MAX = 20;
+// The cv_assets entry fields of the CV and of the letter (extensions/agents/record-assets.mjs writes both).
+const CV_FIELDS = { asset_id: 'asset_id', file: 'file', sha256: 'sha256', pages: 'pages' };
+const LETTER_FIELDS = { asset_id: 'letter_asset_id', file: 'letter_file', sha256: 'letter_sha256', pages: 'letter_pages' };
 
-// cv_url only for an asset id the platform could have issued; cv_pages: the PNG renders of that PDF (entry.pages, in
+// url only for an asset id the platform could have issued; pages: the PNG renders of that PDF (entry pages, in
 // order, same id rule, at most 6), the only form the page can show (the frame refuses PDF links and downloads).
-// cv_stale only when export hashed the recorded file (input.cvFileHashes: {file: sha256 hex}): true means the PDF was
+// stale only when export hashed the recorded file (input.cvFileHashes: {file: sha256 hex}): true means the PDF was
 // regenerated after its upload, so its pages are out of date too.
-function cvFor(entry, hashes) {
-  const url = entry && typeof entry.asset_id === 'string' && ASSET_ID.test(entry.asset_id) ? `/_blob/${entry.asset_id}` : null;
-  const pages = entry && Array.isArray(entry.pages)
-    ? entry.pages.filter((id) => typeof id === 'string' && ASSET_ID.test(id)).slice(0, CV_PAGES_MAX).map((id) => `/_blob/${id}`)
+function assetFor(entry, f, hashes) {
+  const id = entry && entry[f.asset_id];
+  const url = typeof id === 'string' && ASSET_ID.test(id) ? `/_blob/${id}` : null;
+  const pages = entry && Array.isArray(entry[f.pages])
+    ? entry[f.pages].filter((p) => typeof p === 'string' && ASSET_ID.test(p)).slice(0, CV_PAGES_MAX).map((p) => `/_blob/${p}`)
     : [];
-  if (!url && !pages.length) return { cv_url: null, cv_pages: [], cv_stale: null };
-  const cur = typeof entry.file === 'string' && Object.hasOwn(hashes, entry.file) ? hashes[entry.file] : null;
-  const rec = typeof entry.sha256 === 'string' ? entry.sha256.toLowerCase() : null;
-  return { cv_url: url, cv_pages: pages, cv_stale: typeof cur === 'string' ? cur.toLowerCase() !== rec : null };
+  if (!url && !pages.length) return { url: null, pages: [], stale: null };
+  const file = entry[f.file];
+  const cur = typeof file === 'string' && Object.hasOwn(hashes, file) ? hashes[file] : null;
+  const rec = typeof entry[f.sha256] === 'string' ? entry[f.sha256].toLowerCase() : null;
+  return { url, pages, stale: typeof cur === 'string' ? cur.toLowerCase() !== rec : null };
+}
+
+function cvFor(entry, hashes) {
+  const a = assetFor(entry, CV_FIELDS, hashes);
+  return { cv_url: a.url, cv_pages: a.pages, cv_stale: a.stale };
+}
+
+// apps[i].dossier: what the dashboard shows of the dossier prepared for tracker row `num` (data/dossiers.json), with
+// its strategy sheet (input.strategies[num], bounded by validateSheet) and its letter assets. null when the store has
+// no valid dossier for that num.
+function dossierFor(store, num, sheets, assetEntry, hashes) {
+  const d = isObj(store) && isObj(store.dossiers) ? store.dossiers[String(num)] : null;
+  if (validateDossier(d) !== null) return null;
+  const sheet = isObj(sheets) && Object.hasOwn(sheets, String(num)) && isObj(sheets[String(num)]) ? validateSheet(sheets[String(num)]).sheet : null;
+  const letter = assetFor(assetEntry, LETTER_FIELDS, hashes);
+  return {
+    state: d.state,
+    prepared_at: d.prepared_at,
+    letter_state: d.letter.state,
+    has_why: typeof d.letter.why === 'string' && d.letter.why.trim() !== '',
+    message: d.message,
+    answers: d.answers.slice(0, ANSWERS_MAX).map((x) => ({ q: x.q, a: x.a })),
+    strategy: sheet,
+    check_ok: d.check.ok,
+    check_reasons: d.check.reasons,
+    retouche_pending: d.retouches.some((r) => r.done_at === null),
+    letter_url: letter.url,
+    letter_pages: letter.pages,
+    letter_stale: letter.stale,
+  };
 }
 
 function parseTracker(content) {
@@ -181,7 +219,21 @@ export function buildSnapshot(input) {
       followup_urgency: f ? f.urgency : null,
       closes_at: (url && closeDateForUrl(closeIndex, url)) || null,
       ...cvFor(cvAssets[String(row.num)], cvHashes),
+      dossier: dossierFor(input.dossiers, row.num, input.strategies, cvAssets[String(row.num)], cvHashes),
     };
+  });
+
+  // Status proposals (data/proposals.json, validated by export): only for a tracked application whose status
+  // they would change.
+  const appByNum = new Map(apps.map((a) => [a.num, a]));
+  const proposals = (Array.isArray(input.proposals) ? input.proposals : [])
+    .filter((p) => isObj(p) && appByNum.has(p.ref) && appByNum.get(p.ref).status !== p.to_status)
+    .map((p) => ({ id: p.id, ref: p.ref, company: appByNum.get(p.ref).company, from_status: appByNum.get(p.ref).status, to_status: p.to_status, evidence: p.evidence }));
+  // The follow-up text to copy (data/relances.json, validated by export), when there is one.
+  const relances = isObj(input.relances) ? input.relances : {};
+  const followups = due.map((f) => {
+    const r = Object.hasOwn(relances, String(f.num)) ? relances[String(f.num)] : null;
+    return isObj(r) && typeof r.text === 'string' ? { ...f, text: r.text } : f;
   });
 
   const days = [];
@@ -217,8 +269,9 @@ export function buildSnapshot(input) {
     offers: parsePipeline(input.pipelineContent),
     stats: computeTrackerStats(input.trackerContent),
     timeline: days,
-    followups_due: due,
+    followups_due: followups,
     reports,
+    proposals,
     companies,
   };
 }

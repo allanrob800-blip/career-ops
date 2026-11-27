@@ -1,7 +1,7 @@
 /*
  * CapUI: escaping, safe links, Paris dates, animated counters, short notices, in-page dialog,
  * and the loading / empty / unavailable gate shared by every screen. Classic script.
- * Every value read from the db is untrusted: build markup only through esc() and safeHref().
+ * Every value read from the db or from Outlook is untrusted: build markup only through esc() and safeHref().
  */
 (() => {
   'use strict';
@@ -161,6 +161,12 @@
     return `<div class="card empty glass"><svg class="empty-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3 2"/></svg>
       <p class="empty-title">${esc(title)}</p><p class="empty-text">${esc(text)}</p></div>`;
   }
+  // The one message an Outlook section shows instead of its data (text chosen by CapOutlook from the error code).
+  // `section` is 'mail' or 'calendar'; the button only exists when a click may grant access.
+  function outlookNote(sec, section) {
+    const btn = sec.canAuthorize ? `<button type="button" class="btn btn-acc" data-authorize="${esc(section)}"${sec.authorizing ? ' disabled' : ''}>Autoriser Outlook</button>` : '';
+    return `<div class="card glass outlook-note" role="status"><span class="note-ico">${ICON.chat}</span><p class="note-text">${esc(sec.reason)}</p>${btn}</div>`;
+  }
   // Returns true when the screen should render its content.
   function gate(root, state, empty) {
     let view, html;
@@ -217,7 +223,7 @@
   const intent = {}; // cross-screen requests, e.g. { openApp: 3 } consumed by Candidatures
 
   globalThis.CapUI = {
-    esc, safeHref, hostOf, fold, countUp, toast, dialog, closeDialog, gate, rebuild, reduced, emptyBlock,
+    esc, safeHref, hostOf, fold, countUp, toast, dialog, closeDialog, gate, rebuild, reduced, emptyBlock, outlookNote,
     STATUSES, statusLabel, tone, isSent, figures, SENT, REPLIED, INTERVIEWED, OFFERED, CLOSED,
     today, parisHour, isoDay, addDays, daysBetween, week, fmtDay, fmtLong, fmtWeekday, fmtStamp, fmtNum, fmtPct, plural,
     ICON, cleanBullet, intent,

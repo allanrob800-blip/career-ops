@@ -1,11 +1,13 @@
 /*
  * Fake `window.claude` for page tests (injected before page scripts).
- * Mirrors the real claude.ai artifact runtime contract 0.2.99 for the `db` and `user` namespaces
- * (see .superpowers/sdd/.../db-api.md). The `mcp` namespace is still an ASSUMED shape (Task 10).
+ * Mirrors the real claude.ai artifact runtime contract 0.2.99 for the `db`, `user` and `mcp` namespaces
+ * (see .superpowers/sdd/.../db-api.md and mcp-api.md).
  *
  * State:  window.__fake = { db: {docs: {'snapshot/meta': {...}, 'requests/abc': {...}}},
- *                           mcp: {mode: 'ok'|'null'|'error', emails: [...], events: [...]},
- *                           user: {id: 'u1'} }      (a missing/partial `db` or `db.docs` is normalized)
+ *                           mcp: {mode: 'ok'|'null'|'error', code, retryable, shape: 'array'|'blocks',
+ *                                 emails: [...], events: [...], storedAt, latencyMs, deny},
+ *                           user: {id: 'u1'} }      (a missing/partial `db`, `db.docs` or `mcp` is normalized;
+ *                                                    every field is read at call time, so tests may change it live)
  * Calls:  window.__calls = [{ns, fn, args}] — every fake API call, in order.
  * API:
  *   claude.use(name) -> Promise<namespace|null>   ('db' | 'mcp' | 'user'; mcp is null when mode==='null'; unknown -> null)
@@ -19,18 +21,32 @@
  *   window.__fake.db.latencyMs (optional) delays the FIRST delivery of every listener (setTimeout).
  *   onSnapshot fires asynchronously (microtask, independent of timers) on subscribe, then only when a document
  *        under the listener's own path changes (a doc listener: that doc; a collection listener: its direct children).
- *   mcp.watchTool(server, tool, input, handler, opts) -> unsubscribe fn. Async calls
- *        handler({type:'data', result:{payload:[...]}, cache:{storedAt}}) (payload = emails for
- *        tools whose name contains 'mail'/'search_mail', else events), or
- *        handler({type:'error', error:{code:'fake_error', retryable:true}}) when mode==='error'.
- *   mcp.callTool(server, tool, input) -> Promise<{payload:[...]}> (rejects with {code, retryable} in error mode)
+ *   mcp (frozen; `claude.use('mcp')` is null when mode === 'null'). Only the server 'Microsoft 365' with the tools
+ *        outlook_email_search (serves fake.mcp.emails) and outlook_calendar_search (serves fake.mcp.events) exists:
+ *        another server -> error `server_not_found`, another tool -> error `not_in_manifest`. The fake does not
+ *        filter by input: every e-mail watch gets all of fake.mcp.emails (the page must filter and dedupe).
+ *   mcp.watchTool(server, tool, input, handler, options?) -> SYNCHRONOUS unsubscribe. A non-function handler throws
+ *        TypeError synchronously. The first delivery is asynchronous (setTimeout; fake.mcp.latencyMs delays it):
+ *          handler({type:'data', result:{content:[{type:'text', text}], payload, cache?}})
+ *          handler({type:'error', error:{code, server, message, retryable?}})     when mode === 'error'
+ *        Error code = fake.mcp.code (default 'upstream_error'); `retryable: true` only when fake.mcp.retryable.
+ *        shape 'array' (default): ONE text block holding the JSON array, payload = that array.
+ *        shape 'blocks': one text block PER item, payload = the first item only (first text block parsed).
+ *        cache = {storedAt: fake.mcp.storedAt (epoch ms), revalidating:false} when storedAt is set; absent = fresh.
+ *        A second live registration of the same (server, tool, input) gets an error event `bad_request`.
+ *   mcp.callTool(server, tool, input?, options?) -> Promise<CallToolResult {content, payload, cache?}>; REJECTS an
+ *        McpError {code, server, message, retryable?} in error mode. A call may ask the user for approval: when the
+ *        code is approval_required / consent_required the fake "approves" (mode becomes 'ok' and the call
+ *        resolves) unless fake.mcp.deny is set.
+ *   mcp.invalidate(server?, tool?, input?) -> re-delivers (setTimeout, after fake.mcp.latencyMs) to the matching live watches.
+ *   window.__mcpRefetch() (test control, not part of the API) -> re-delivers to every live watch, as a poll would.
  *   user: id() -> Promise<'u1'>, can(cap) -> true, canEdit() -> true, isOwner() -> true
  */
 (() => {
   const fake = (window.__fake = window.__fake || {});
   fake.db = fake.db || {};
   fake.db.docs = fake.db.docs || {};
-  fake.mcp = fake.mcp || { mode: 'ok', emails: [], events: [] };
+  fake.mcp = fake.mcp || {};
   fake.user = fake.user || { id: 'u1' };
   window.__calls = [];
 
@@ -168,23 +184,70 @@
   }
   const db = Object.freeze({ doc, collection });
 
-  const mcp = {
+  // ---- mcp ----
+  const MCP_SERVER = 'Microsoft 365';
+  const MCP_TOOLS = { outlook_email_search: 'emails', outlook_calendar_search: 'events' };
+  const mcpCfg = () => (fake.mcp = fake.mcp || {}); // harness may replace fake.mcp after init
+  const sorted = (k, v) => (isPlain(v) ? Object.fromEntries(Object.keys(v).sort().map((key) => [key, v[key]])) : v);
+  const identity = (server, tool, input) => JSON.stringify([server, tool, input ?? {}], sorted);
+  function mcpError(code) {
+    const e = { code, server: MCP_SERVER, message: `fake ${code}` };
+    if (mcpCfg().retryable) e.retryable = true;
+    return e;
+  }
+  // -> {error: McpError} | {result: CallToolResult}, from the configuration at call time
+  function outcome(server, tool) {
+    const c = mcpCfg();
+    if (server !== MCP_SERVER) return { error: mcpError('server_not_found') };
+    if (!(tool in MCP_TOOLS)) return { error: mcpError('not_in_manifest') };
+    if (c.mode === 'error') return { error: mcpError(c.code || 'upstream_error') };
+    const items = clone(c[MCP_TOOLS[tool]] || []);
+    const result = c.shape === 'blocks'
+      ? { content: items.map((it) => ({ type: 'text', text: JSON.stringify(it) })), payload: items[0] }
+      : { content: [{ type: 'text', text: JSON.stringify(items) }], payload: items };
+    if (c.storedAt != null) result.cache = { storedAt: c.storedAt, revalidating: false };
+    return { result };
+  }
+  const watches = new Map(); // identity -> {server, tool, key, deliver}
+  const mcp = Object.freeze({
     watchTool(server, tool, input, handler, opts) {
+      if (typeof handler !== 'function') throw new TypeError('mcp.watchTool: handler must be a function');
       rec('mcp', 'watchTool', [server, tool, input, opts]);
+      const key = identity(server, tool, input);
       let live = true;
-      setTimeout(() => {
-        if (!live) return;
-        if (fake.mcp.mode === 'error') handler({ type: 'error', error: { code: 'fake_error', retryable: true } });
-        else handler({ type: 'data', result: { payload: clone(payloadFor(tool)) }, cache: { storedAt: new Date().toISOString() } });
-      }, 0);
-      return () => { live = false; };
+      if (watches.has(key)) {
+        setTimeout(() => { if (live) handler({ type: 'error', error: mcpError('bad_request') }); }, 0);
+        return () => { live = false; };
+      }
+      const w = {
+        server, tool, key,
+        deliver() {
+          if (!live) return;
+          const o = outcome(server, tool);
+          handler(o.error ? { type: 'error', error: o.error } : { type: 'data', result: o.result });
+        },
+      };
+      watches.set(key, w);
+      setTimeout(w.deliver, mcpCfg().latencyMs || 0);
+      return () => { live = false; if (watches.get(key) === w) watches.delete(key); };
     },
     async callTool(server, tool, input) {
       rec('mcp', 'callTool', [server, tool, input]);
-      if (fake.mcp.mode === 'error') throw { code: 'fake_error', retryable: true };
-      return { payload: clone(payloadFor(tool)) };
+      const c = mcpCfg();
+      if (c.mode === 'error' && (c.code === 'approval_required' || c.code === 'consent_required') && !c.deny) c.mode = 'ok';
+      const o = outcome(server, tool);
+      if (o.error) throw o.error;
+      return o.result;
     },
-  };
+    invalidate(server, tool, input) {
+      rec('mcp', 'invalidate', [server, tool, input]);
+      const key = input === undefined ? null : identity(server, tool, input);
+      for (const w of watches.values()) {
+        if ((server === undefined || w.server === server) && (tool === undefined || w.tool === tool) && (key === null || w.key === key)) setTimeout(w.deliver, mcpCfg().latencyMs || 0);
+      }
+    },
+  });
+  window.__mcpRefetch = () => { for (const w of [...watches.values()]) w.deliver(); };
   const user = Object.freeze({ id: async () => fake.user.id, can: () => true, canEdit: () => true, isOwner: () => true });
 
   window.claude = {
@@ -192,7 +255,7 @@
       rec('claude', 'use', [name]);
       if (name === 'db') return db;
       if (name === 'user') return user;
-      if (name === 'mcp') return fake.mcp.mode === 'null' ? null : mcp;
+      if (name === 'mcp') return mcpCfg().mode === 'null' ? null : mcp;
       return null;
     },
   };

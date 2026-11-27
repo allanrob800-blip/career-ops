@@ -20,10 +20,12 @@
 
   function outlookSig(o) {
     if (!o) return null;
-    return [o.status, o.storedAt, (o.messages || []).map((m) => `${m && m.id}:${m && m.handled}`), (o.events || []).length];
+    return [o.status, o.reason, o.stale, o.storedAt, (o.messages || []).map((m) => `${m && m.id}:${m && m.handled}`), (o.events || []).map((e) => [e && e.subject, e && e.startMs])];
   }
 
+  // CapOutlook resolves the {dateTime, timeZone} wall-clock pair into startMs.
   function eventStart(e) {
+    if (e && Number.isFinite(e.startMs)) return e.startMs;
     const t = Date.parse(e && e.start && typeof e.start.dateTime === 'string' ? e.start.dateTime : '');
     return Number.isNaN(t) ? null : t;
   }
@@ -38,8 +40,9 @@
       if (n) items.push(`<li class="todo-item"><span class="todo-ico">${CapUI.ICON.chat}</span><a href="#messages"><span data-count="messages">${esc(n)}</span> ${n > 1 ? 'messages' : 'message'} à traiter</a></li>`);
       const next = (o.events || []).map((e) => ({ e, t: eventStart(e) })).filter((x) => x.t != null && x.t >= Date.now()).sort((a, b) => a.t - b.t)[0];
       if (next) items.push(`<li class="todo-item"><span class="todo-ico">${CapUI.ICON.users}</span><span>Prochain entretien : <strong>${esc(next.e.subject || 'Entretien')}</strong> · ${esc(CapUI.fmtStamp(new Date(next.t).toISOString()))}</span></li>`);
+      if (o.stale) items.push('<li class="todo-quiet">Outlook : peut-être pas à jour</li>');
     } else {
-      items.push(`<li class="todo-quiet">${o.status === 'loading' ? 'Outlook : chargement…' : 'Outlook indisponible pour l\'instant'}</li>`);
+      items.push(`<li class="todo-quiet">${o.status === 'loading' ? 'Outlook : chargement…' : esc(o.reason || 'Outlook indisponible pour l\'instant')}</li>`);
     }
     for (const f of snap.followups_due || []) {
       items.push(`<li class="todo-item" data-followup><span class="todo-ico">${CapUI.ICON.clock}</span>

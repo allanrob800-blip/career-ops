@@ -279,7 +279,7 @@ svg text { paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-lin
 .wd-dots .dot-sent { background: var(--muted); }
 .agenda { display: grid; gap: 6px; margin-top: 14px; }
 .ag { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; border-radius: 12px; background: var(--track); font-size: .9rem; }
-.ag-day { font-weight: 700; white-space: nowrap; }
+.ag-day { font-weight: 700; white-space: nowrap; flex: none; }
 .ag-text { overflow-wrap: anywhere; }
 .ag-close { background: var(--soft-acc); }
 .ag-none { color: var(--muted); font-size: .9rem; }
@@ -450,6 +450,88 @@ table.apps { width: 100%; border-collapse: collapse; }
 .prog-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .prog-co { font-weight: 800; overflow-wrap: anywhere; }
 .prog-role { font-size: .88rem; color: var(--muted); margin: 2px 0 8px; overflow-wrap: anywhere; }
+
+/* ---------- Outlook (shared by Planning and Messages) ---------- */
+.outlook-bar { justify-content: space-between; }
+.fresh { color: var(--muted); font-size: .85rem; }
+.fresh:empty, .count:empty { display: none; }
+.fresh.is-stale { color: var(--warn); font-weight: 600; }
+.outlook-note { display: grid; justify-items: center; text-align: center; gap: 14px; padding: 32px 24px; }
+.note-ico { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--soft-acc); color: var(--acc-ink); }
+.note-ico svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.note-text { max-width: 44ch; font-weight: 600; }
+.btn[disabled] { opacity: .6; cursor: default; }
+
+/* ---------- Messages ---------- */
+.msgs { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+.read-only { color: var(--muted); font-size: .85rem; text-align: center; }
+.threads { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 1100px) { .threads { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.thread { display: grid; gap: 14px; }
+.thread-head { display: flex; align-items: center; gap: 12px; }
+.avatar { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; flex: none; background: linear-gradient(140deg, var(--acc-fill), var(--acc-fill2)); color: var(--on-acc); font: 700 1.15rem/1 var(--font-display); text-transform: uppercase; }
+.avatar-quiet { background: var(--track); color: var(--muted); }
+.avatar svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.thread-title { overflow-wrap: anywhere; }
+.thread-n { font: 600 .9rem/1 var(--font-text); color: var(--muted); white-space: nowrap; }
+.bubbles { display: grid; gap: 10px; justify-items: start; }
+.bubble { display: grid; gap: 4px; width: 100%; max-width: 62ch; padding: 12px 14px; border-radius: 6px 20px 20px 20px; background: var(--glass-solid); border: 1px solid var(--line); overflow-wrap: anywhere; }
+.bubble-from { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: .9rem; }
+.bubble-addr { color: var(--muted); font-size: .82rem; }
+.bubble-subject { font-weight: 700; line-height: 1.3; }
+.bubble-text { color: var(--muted); font-size: .92rem; }
+.bubble-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 6px; }
+.bubble-time { font-size: .8rem; color: var(--muted); }
+.bubble-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bubble.is-handled { background: none; }
+.bubble.is-handled .bubble-subject, .bubble.is-handled .bubble-from { color: var(--muted); }
+.badge svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- Planning: list by day, week columns from 900px ---------- */
+.plan { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+.week-nav { display: flex; align-items: center; gap: 8px; }
+.week-label { font: 700 1.1rem/1.2 var(--font-display); }
+.icon-btn svg { width: 20px; height: 20px; }
+.icon-btn[disabled] { opacity: .4; cursor: default; }
+.plan-card { padding: 6px 14px; }
+.plan-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
+.day { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 14px; align-items: start; padding: 12px 0; }
+.day.is-empty:not(.is-today) { display: none; }
+.day-head { display: grid; justify-items: center; gap: 2px; font: inherit; }
+.day-name { font-size: .75rem; font-weight: 600; color: var(--muted); text-transform: capitalize; }
+.day-num { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; font: 700 1.25rem/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.day.is-past .day-num { color: var(--muted); }
+.day.is-today .day-num { background: var(--acc-fill); color: var(--on-acc); }
+.day-list { display: grid; gap: 8px; align-content: start; }
+.day-none { color: var(--muted); font-size: .9rem; padding: 9px 0; }
+.ev { display: grid; gap: 2px; padding: 10px 12px; border-radius: 14px; background: var(--track); overflow-wrap: anywhere; }
+.ev-meet { background: color-mix(in srgb, var(--acc) 10%, var(--glass-solid)); border: 1px solid color-mix(in srgb, var(--acc) 24%, transparent); }
+.ev-due { background: color-mix(in srgb, var(--warn) 10%, var(--glass-solid)); padding: 0; }
+.ev-follow { padding: 0; }
+.ev-btn { display: grid; gap: 2px; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-radius: inherit; background: none; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.ev-time { font-size: .8rem; font-weight: 700; color: var(--acc-ink); }
+.ev-zone { font-weight: 600; color: var(--muted); }
+.ev-due .ev-time { color: var(--warn); }
+.ev-follow .ev-time { color: var(--muted); }
+.ev-title { font-weight: 700; line-height: 1.3; }
+.ev-sub { font-size: .85rem; color: var(--muted); }
+.ev-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-bottom: -8px; font-size: .85rem; font-weight: 700; color: var(--acc-ink); text-decoration: none; justify-self: start; }
+.ev-link svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.now-line { display: flex; align-items: center; gap: 6px; }
+.now-line span { padding: 1px 7px; border-radius: 999px; background: var(--acc-fill); color: var(--on-acc); font-size: .72rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.now-line::after { content: ''; flex: 1; height: 2px; border-radius: 2px; background: var(--acc-fill); }
+@media (min-width: 900px) {
+  .plan-card { padding: 8px; }
+  .plan-scroll { overflow-x: auto; }
+  .plan-grid { grid-template-columns: repeat(7, minmax(136px, 1fr)); }
+  .day, .day.is-empty:not(.is-today) { display: flex; flex-direction: column; gap: 12px; min-height: 360px; padding: 10px 8px 14px; border-left: 1px solid var(--line); }
+  .plan-grid > .day:first-child { border-left: 0; }
+  .day-head { display: flex; align-items: center; gap: 8px; padding-left: 4px; }
+  .day-name { font-size: .85rem; }
+  .day-num { width: 36px; height: 36px; font-size: 1.1rem; }
+  .day:not(.is-today) .day-none { display: none; }
+  .day-none { text-align: center; }
+}
 
 /* ---------- motion (all off under reduced motion; glass panels never animate, only their children) ---------- */
 .is-entering .screen-body { animation: screen-in .55s cubic-bezier(.2,.8,.2,1) both; transform-origin: 50% 0; }

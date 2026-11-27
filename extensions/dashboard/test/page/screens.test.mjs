@@ -1,27 +1,17 @@
 // Task 7: Accueil, Offres, Candidatures, Analytique on the fixture snapshot (and an empty db).
+// Task 8 adds Planning and Messages to the shared layout, touch-target, hostile-data and empty-state checks.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { startServer, launchBrowser, openPage } from './harness.mjs';
-import { FIXTURE_ROOT } from '../helpers.mjs';
+import { fixtureDocs, EMAILS, EVENTS, NOW } from './fixtures.mjs';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const EXPORT = join(HERE, '..', '..', 'export.mjs');
 const SHOTS = join(tmpdir(), 'cap-shots');
-const NOW = '2026-11-27T10:00:00+01:00'; // Friday morning, Paris
 const SCREENS = ['accueil', 'offres', 'candidatures', 'analytique'];
-
-// Fixture docs only: the data root is forced to the fixtures, never the real one.
-function fixtureDocs() {
-  const env = { ...process.env, CAREER_OPS_ROOT: FIXTURE_ROOT };
-  for (const k of ['CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_PROFILE']) delete env[k];
-  const out = JSON.parse(execFileSync(process.execPath, [EXPORT], { env, encoding: 'utf8' }));
-  return Object.fromEntries(out.docs.map((d) => [d.path, d.data]));
-}
+const OUTLOOK = ['planning', 'messages']; // Task 8: need a delivered Outlook section before they are measured
+const ALL = [...SCREENS, ...OUTLOOK];
 
 let server, browser, DOCS;
 before(async () => { DOCS = fixtureDocs(); server = await startServer(); browser = await launchBrowser(); mkdirSync(SHOTS, { recursive: true }); });
@@ -29,7 +19,8 @@ after(async () => { await browser?.close(); await server?.close(); });
 
 async function open(opts = {}) {
   const { docs = DOCS, ...rest } = opts;
-  const p = await openPage(browser, { url: server.url, now: NOW, fake: { db: { docs: structuredClone(docs) } }, ...rest });
+  const fake = { db: { docs: structuredClone(docs) }, mcp: { mode: 'ok', emails: EMAILS, events: EVENTS } };
+  const p = await openPage(browser, { url: server.url, now: NOW, fake, ...rest });
   p.page.setDefaultTimeout(5000);
   p.dialogs = [];
   p.page.on('dialog', (d) => { p.dialogs.push(d.message()); d.dismiss().catch(() => {}); });
@@ -38,7 +29,10 @@ async function open(opts = {}) {
 const body = (name) => `#screen-${name} .screen-body`;
 async function go(p, name, view = name) {
   await p.page.evaluate((n) => { location.hash = n; }, name);
-  await p.page.waitForFunction(([sel, v]) => document.querySelector(sel)?.dataset.view === v, [body(name), view]);
+  await p.page.waitForFunction(([sel, v, o]) => {
+    const el = document.querySelector(sel);
+    return el?.dataset.view === v && (!o || el.dataset.outlook === 'ok');
+  }, [body(name), view, view === name && OUTLOOK.includes(name)]);
   await p.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
@@ -52,9 +46,11 @@ test('Accueil: greeting, weekly goal 3 sur 3 (ISO week 23-29/11, Paris), KPI car
     await p.page.waitForFunction(() => document.querySelector('[data-kpi=rate] .kpi-num')?.textContent.replace(/\s/g, '') === '50%');
     assert.equal((await p.page.locator('[data-kpi=interviews] .kpi-num').innerText()).trim(), '1');
     assert.equal((await p.page.locator('[data-kpi=offers] .kpi-num').innerText()).trim(), '0');
+    await p.page.waitForFunction(() => document.querySelector('[data-count=messages]'));
     const todo = await p.page.locator('#todo').innerText();
     assert.match(todo, /Borealis/); // overdue follow-up
-    assert.match(todo, /Outlook non connecté/);
+    assert.doesNotMatch(todo, /Outlook non connecté/); // Task 8 provides ctx.outlook
+    assert.match(todo, /2\s+messages à traiter/);
     assert.equal(await p.page.locator('.mini-week [data-day]').count(), 7);
     assert.match(await p.page.locator('#sync-note').innerText(), /Synchronisé/);
     assert.deepEqual(p.errors, []);
@@ -78,7 +74,7 @@ test('Accueil: offer closing within 7 days shows a flame (SVG, no emoji)', async
 test('hostile company name renders as text everywhere, no img, no dialog', async () => {
   const p = await open();
   try {
-    for (const s of SCREENS) {
+    for (const s of ALL) {
       await go(p, s);
       assert.equal(await p.page.locator('img[src=x]').count(), 0, `img on ${s}`);
     }
@@ -176,8 +172,8 @@ test('Analytique: period toggle redraws the curve; funnel, donut, response rate'
 test('empty database: every screen shows its French empty state, no console error', async () => {
   const p = await open({ docs: {} });
   try {
-    const expect = { accueil: /synchronisation/, offres: /Aucune offre/, candidatures: /Aucune candidature/, analytique: /Pas encore/ };
-    for (const s of SCREENS) {
+    const expect = { accueil: /synchronisation/, offres: /Aucune offre/, candidatures: /Aucune candidature/, analytique: /Pas encore/, planning: /synchronisation/, messages: /synchronisation/ };
+    for (const s of ALL) {
       await go(p, s, 'gate-empty');
       const e = p.page.locator(`${body(s)} .empty`);
       assert.ok(await e.isVisible(), s);
@@ -251,7 +247,7 @@ for (const width of [360, 430, 720, 1440]) {
     test(`layout ${width}px theme=${theme ?? 'none'}: no horizontal overflow, screenshots`, async () => {
       const p = await open({ device: { width, height: 900 }, theme, reducedMotion: true });
       try {
-        for (const s of SCREENS) {
+        for (const s of ALL) {
           await go(p, s);
           await p.page.waitForTimeout(30);
           const r = await p.page.evaluate(overflowScan);
@@ -270,7 +266,7 @@ for (const width of [360, 430, 720, 1440]) {
 test('touch targets: buttons, links, summaries and fields in screens are >= 44px tall at 430px', async () => {
   const p = await open({ device: { width: 430, height: 900 }, reducedMotion: true });
   try {
-    for (const s of SCREENS) {
+    for (const s of ALL) {
       await go(p, s);
       const small = await p.page.evaluate((sel) => [...document.querySelectorAll(`${sel} :is(button, a[href], summary, select, input, textarea)`)]
         .map((el) => ({ el, r: el.getBoundingClientRect() }))

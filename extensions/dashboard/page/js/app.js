@@ -46,7 +46,7 @@
 
   // ---- render coordinator: one CapData subscription, the current screen re-renders on change ----
   const ACCENTS = ['corail', 'vert-eau', 'violet', 'bleu', 'ambre'];
-  const ctx = {}; // shared screen context (Task 8 adds ctx.outlook through CapApp.setContext)
+  const ctx = {}; // shared screen context; ctx.outlook is the latest CapOutlook state
   let lastRoute = null;
   let dataState = null;
   let frame = 0;
@@ -81,9 +81,22 @@
   }
   const schedule = () => { if (!frame) frame = requestAnimationFrame(() => paint(false)); };
 
+  // Outlook starts once, with the first snapshot that carries companies (never from a render). Later snapshots
+  // and handled-message changes only refresh it: existing watches are never registered again.
+  let outlookStarted = false;
+  function syncOutlook(s) {
+    const snap = s.snapshot;
+    if (!globalThis.CapOutlook || !snap || !Array.isArray(snap.companies)) return;
+    const companies = CapOutlook.rank(snap.companies, snap.apps);
+    if (outlookStarted) { CapOutlook.update(companies); return; }
+    outlookStarted = true;
+    CapOutlook.start(companies, (o) => { ctx.outlook = o; schedule(); });
+  }
+
   function onState(s) {
     dataState = s;
     applyPrefs(s.prefs || {});
+    try { syncOutlook(s); } catch (e) { console.error('Cap: Outlook sync failed', e); }
     schedule();
   }
 

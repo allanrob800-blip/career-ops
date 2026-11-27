@@ -1,4 +1,4 @@
-/* Cap — page shell: hash routing, navigation, "Plus" sheet. Classic script. */
+/* Cap — page shell: hash routing, navigation, "Plus" sheet, render coordinator. Classic script. */
 (() => {
   'use strict';
   const ROUTES = ['accueil', 'offres', 'candidatures', 'planning', 'messages', 'analytique', 'reglages'];
@@ -37,10 +37,54 @@
     });
     moreBtn.classList.toggle('is-active', EXTRA.includes(route));
     closeSheet(false);
-    const el = $('#screen-' + route);
-    const screens = globalThis.Screens;
-    if (screens && screens[route] && typeof screens[route].show === 'function') screens[route].show($('.screen-body', el));
+    if (globalThis.CapUI && route !== lastRoute) CapUI.closeDialog();
+    const entering = route !== lastRoute;
+    lastRoute = route;
+    paint(entering);
     document.dispatchEvent(new CustomEvent('cap:route', { detail: { route } }));
+  }
+
+  // ---- render coordinator: one CapData subscription, the current screen re-renders on change ----
+  const ACCENTS = ['corail', 'vert-eau', 'violet', 'bleu', 'ambre'];
+  const ctx = {}; // shared screen context (Task 8 adds ctx.outlook through CapApp.setContext)
+  let lastRoute = null;
+  let dataState = null;
+  let frame = 0;
+
+  function applyPrefs(prefs) {
+    const root = document.documentElement;
+    if (ACCENTS.includes(prefs.accent)) root.dataset.accent = prefs.accent; else delete root.dataset.accent;
+    if (prefs.reduced_motion) root.dataset.motion = 'reduce'; else delete root.dataset.motion;
+  }
+
+  function enter(section) {
+    if (!globalThis.CapUI || CapUI.reduced()) return;
+    section.classList.remove('is-entering');
+    void section.offsetWidth; // restart the CSS animation
+    section.classList.add('is-entering');
+    clearTimeout(section.__capEnter);
+    section.__capEnter = setTimeout(() => section.classList.remove('is-entering'), 1000);
+  }
+
+  function paint(entering) {
+    frame = 0;
+    const route = currentRoute();
+    const section = $('#screen-' + route);
+    const body = $('.screen-body', section);
+    const screen = globalThis.Screens && globalThis.Screens[route];
+    if (!screen || typeof screen.render !== 'function') return;
+    const before = body.dataset.view;
+    try { screen.render(body, dataState || { status: 'loading', snapshot: null, pending: [], prefs: {} }, ctx); }
+    catch (e) { console.error('Cap: render failed', e); }
+    const now = body.dataset.view || '';
+    if ((entering || now !== before) && !now.startsWith('gate-')) enter(section);
+  }
+  const schedule = () => { if (!frame) frame = requestAnimationFrame(() => paint(false)); };
+
+  function onState(s) {
+    dataState = s;
+    applyPrefs(s.prefs || {});
+    schedule();
   }
 
   moreBtn.addEventListener('click', () => (sheet.hidden ? openSheet() : closeSheet(true)));
@@ -51,6 +95,18 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(true); });
   window.addEventListener('hashchange', render);
 
-  globalThis.CapApp = { ROUTES, currentRoute, render };
+  globalThis.CapApp = {
+    ROUTES, ACCENTS, currentRoute, render,
+    state: () => dataState,
+    setContext(partial) { Object.assign(ctx, partial); schedule(); },
+    openApp(num) {
+      if (!globalThis.CapUI) return;
+      CapUI.intent.openApp = num;
+      if (currentRoute() === 'candidatures') paint(false); else location.hash = 'candidatures';
+    },
+    // Tests that drive CapData themselves set globalThis.CAP_MANUAL_START before load and call connect().
+    connect() { if (globalThis.CapData) CapData.start(onState); },
+  };
   render();
+  if (!globalThis.CAP_MANUAL_START) CapApp.connect();
 })();

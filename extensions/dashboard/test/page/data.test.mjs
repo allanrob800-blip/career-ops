@@ -20,7 +20,7 @@ function gen(g, n = 1) {
 const metaOnly = (docs) => ({ 'snapshot/meta': docs['snapshot/meta'] });
 
 async function open(fake, opts = {}) {
-  const p = await openPage(browser, { url: server.url, fake: { db: { docs: fake } }, ...opts });
+  const p = await openPage(browser, { url: server.url, manualStart: true, fake: { db: { docs: fake } }, ...opts });
   await p.page.evaluate(() => { window.__states = []; CapData.start((s) => window.__states.push(JSON.parse(JSON.stringify(s)))); });
   return p;
 }
@@ -76,7 +76,7 @@ test('empty database: status empty', async () => {
 
 test('db null -> unavailable within 11 s (simulated clock); never-answering db too', async () => {
   for (const mode of ['null', 'hang']) {
-    const p = await openPage(browser, { url: server.url });
+    const p = await openPage(browser, { url: server.url, manualStart: true });
     try {
       await p.page.clock.install();
       await p.page.evaluate((mode) => {
@@ -94,7 +94,7 @@ test('db null -> unavailable within 11 s (simulated clock); never-answering db t
 });
 
 test('absent window.claude is treated as unavailable', async () => {
-  const p = await openPage(browser, { url: server.url });
+  const p = await openPage(browser, { url: server.url, manualStart: true });
   try {
     await p.page.evaluate(() => { delete window.claude; window.__states = []; CapData.start((s) => window.__states.push(s.status)); });
     await settle(p);
@@ -210,7 +210,7 @@ test('markHandled / handledIds: encoded doc id, raw id in body, one listener per
 });
 
 test('fake db mirrors the real API: update on missing doc rejects, path grammar throws, scoped notifications', async () => {
-  const p = await openPage(browser, { url: server.url, fake: { db: {} } });
+  const p = await openPage(browser, { url: server.url, manualStart: true, fake: { db: {} } });
   try {
     const r = await p.page.evaluate(async () => {
       const db = await claude.use('db');
@@ -241,7 +241,7 @@ test('fake db mirrors the real API: update on missing doc rejects, path grammar 
 
 test('savePrefs before the first prefs delivery merges onto the stored doc', async () => {
   const stored = { weekly_goal: 7, accent: 'ocean', reduced_motion: true };
-  const p = await openPage(browser, { url: server.url, fake: { db: { docs: { 'settings/prefs': stored }, latencyMs: 200 } } });
+  const p = await openPage(browser, { url: server.url, manualStart: true, fake: { db: { docs: { 'settings/prefs': stored }, latencyMs: 200 } } });
   try {
     await p.page.evaluate(() => { window.__states = []; CapData.start((s) => window.__states.push(JSON.parse(JSON.stringify(s)))); });
     await p.page.evaluate(() => CapData.savePrefs({ reduced_motion: false }));

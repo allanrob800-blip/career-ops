@@ -52,10 +52,11 @@ function contextOptions(device) {
 
 /**
  * Opens the page. Returns { page, context, errors, close }.
- * opts: { url (server url), device, theme, reducedMotion, fake, hash }
+ * opts: { url (server url), device, theme, reducedMotion, fake, hash, now (fixed Date.now: Date|string|number),
+ *         manualStart (app.js does not start CapData; the test calls CapData.start itself) }
  */
 export async function openPage(browser, opts) {
-  const { url, device = { width: 1440, height: 900 }, theme, reducedMotion, fake, hash = '' } = opts;
+  const { url, device = { width: 1440, height: 900 }, theme, reducedMotion, fake, hash = '', now, manualStart } = opts;
   const context = await browser.newContext({
     ...contextOptions(device),
     ...(reducedMotion ? { reducedMotion: 'reduce' } : {}),
@@ -63,7 +64,9 @@ export async function openPage(browser, opts) {
   // Google Fonts is the only allowed external load; stub it so tests stay offline.
   await context.route(/https:\/\/fonts\.(googleapis|gstatic)\.com\//, (route) =>
     route.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+  if (now != null) await context.clock.setFixedTime(new Date(now)); // timers keep running
   await context.addInitScript({ path: FAKE_CLAUDE });
+  if (manualStart) await context.addInitScript(() => { globalThis.CAP_MANUAL_START = true; });
   if (fake) await context.addInitScript((f) => { Object.assign(window.__fake, f); }, fake);
   if (theme) {
     // <html> does not exist yet when init scripts run: set the attribute as soon as it appears.

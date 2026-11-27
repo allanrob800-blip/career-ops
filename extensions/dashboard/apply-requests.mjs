@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Applies change requests written by the dashboard page, strictly through set-status.mjs.
+// Applies change requests written by the dashboard page: status and note strictly through set-status.mjs;
+// why and retouche only in the dossier store {DATA_ROOT}/data/dossiers.json, never in the tracker.
 // Usage: node apply-requests.mjs --in <file> [--dry-run]
 //   <file> is the output of `db_query requests` (or `db_list requests`): one JSON object per line,
 //   {id, data, version, updatedAt}; lines that are not such an object (the summary, a wrapper) are ignored.
@@ -9,6 +10,7 @@
 //   ops      every write-back, as db_write ops: merge of the result fields only, with ifVersion
 //   batches  the same ops cut into db_write calls of at most 50 ops (one call per batch, in order)
 // Only entries whose data.state is exactly "pending" are considered. They run in created_at order, then id.
+// The why / retouche requests of one run change one in-memory store, written once at the end (not in --dry-run).
 import { readFileSync, existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -17,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { getCareerOpsRoot, resolveTrackerPath } from '../../path-resolver.mjs';
 import { trackerStatusByNum } from '../../stats.mjs';
 import { parseDbLines } from './lib/db-lines.mjs';
+import { readDossiers, writeDossiers, setWhy, addRetouche, normalizeText } from '../agents/lib/dossiers.mjs';
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -26,6 +29,9 @@ const MAX_OPS = 50; // db_write: 1 to 50 ops per call
 
 export const CANONICAL_STATUSES = ['Evaluated', 'Speculative', 'Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
+// Request types that change a dossier: type → the dossiers.mjs function that applies the text.
+const DOSSIER_UPDATES = { why: setWhy, retouche: addRetouche };
+const isDossierType = (type) => typeof type === 'string' && Object.hasOwn(DOSSIER_UPDATES, type);
 
 const short = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 300) || 'set-status failed';
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -37,7 +43,7 @@ export const parisDay = (iso) => dayFmt.format(new Date(Date.parse(iso)));
 /** Returns an error string, or null when the request data is valid. */
 export function validate(data) {
   if (!isObj(data)) return 'missing or malformed data';
-  if (data.type !== 'status' && data.type !== 'note') return 'unknown request type';
+  if (data.type !== 'status' && data.type !== 'note' && !isDossierType(data.type)) return 'unknown request type';
   if (!Number.isInteger(data.ref) || data.ref <= 0) return 'ref must be a positive integer';
   if (typeof data.created_at !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(data.created_at) || Number.isNaN(Date.parse(data.created_at))) {
     return 'created_at is not a valid date';
@@ -47,7 +53,11 @@ export function validate(data) {
     if (data.note.length > 500) return 'note exceeds 500 characters';
     if (CONTROL_CHARS.test(data.note)) return 'note contains control characters';
   }
-  if (data.type === 'status') {
+  if (isDossierType(data.type)) {
+    if (typeof data.text !== 'string') return 'text must be a string';
+    if (CONTROL_CHARS.test(data.text)) return 'text contains control characters (line breaks included)';
+    if (normalizeText(data.text) === null) return 'text must be 1 to 500 characters with no control character';
+  } else if (data.type === 'status') {
     if (!CANONICAL_STATUSES.includes(data.to_status)) return 'to_status is not a canonical status';
     if (!CANONICAL_STATUSES.includes(data.from_status)) {
       return 'status request without a canonical from_status (written by an older page): ask again from the dashboard';
@@ -75,12 +85,54 @@ function lastJson(stdout) {
   try { return i >= 0 ? JSON.parse(s.slice(i + 1)) : null; } catch { return null; }
 }
 
-async function applyOne(entry, dryRun) {
+// The dossier store of one run, read on the first why / retouche request.
+function dossierSession() {
+  let root = null;
+  let store = null;
+  let readError = null;
+  let changed = false;
+  return {
+    /** Applies one valid why / retouche request to the in-memory store: null, or the reason it was refused. */
+    apply(data) {
+      if (!store && !readError) {
+        try {
+          root = getCareerOpsRoot();
+          store = readDossiers(root);
+        } catch (e) {
+          readError = short(`cannot read data/dossiers.json: ${e.message}`);
+        }
+      }
+      if (readError) return readError;
+      const res = DOSSIER_UPDATES[data.type](store, data.ref, data.text, data.created_at);
+      if (!res.ok) return res.reason;
+      changed = true;
+      return null;
+    },
+    /** Writes the store when a request changed it: null, or the reason the write failed. */
+    save() {
+      if (!changed) return null;
+      try {
+        writeDossiers(root, store);
+        return null;
+      } catch (e) {
+        return short(`cannot write data/dossiers.json: ${e.message}`);
+      }
+    },
+  };
+}
+
+async function applyOne(entry, dryRun, dossiers) {
   const id = entry.id;
   const data = entry.data;
   const reject = (reason, seen) => ({ id, state: 'rejected', reason, applied_at: null, ...(seen ? { from_status_seen: seen } : {}) });
   const invalid = validate(data);
   if (invalid) return reject(invalid);
+
+  if (isDossierType(data.type)) {
+    const refused = dossiers.apply(data);
+    if (refused) return reject(refused);
+    return { id, state: dryRun ? 'would_apply' : 'applied', reason: null, applied_at: dryRun ? null : new Date().toISOString() };
+  }
 
   let toStatus = data.to_status;
   if (data.type === 'note') {
@@ -122,8 +174,16 @@ export async function applyRequests(entries, { dryRun = false } = {}) {
   const pending = (Array.isArray(entries) ? entries : [])
     .filter((e) => isObj(e) && isObj(e.data) && e.data.state === 'pending')
     .sort(byCreated);
+  const dossiers = dossierSession();
   const out = [];
-  for (const entry of pending) out.push({ result: await applyOne(entry, dryRun), version: entry.version });
+  for (const entry of pending) out.push({ result: await applyOne(entry, dryRun, dossiers), version: entry.version });
+  const writeError = dryRun ? null : dossiers.save();
+  if (writeError) {
+    // Nothing of this run reached dossiers.json: its why / retouche requests were not applied after all.
+    out.forEach((a, i) => {
+      if (a.result.state === 'applied' && isDossierType(pending[i].data.type)) a.result = { id: a.result.id, state: 'rejected', reason: writeError, applied_at: null };
+    });
+  }
   return out;
 }
 

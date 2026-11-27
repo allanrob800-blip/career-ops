@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "dossiers": {
+    "1": {
+      "state": "pret",
+      "prepared_at": "2026-11-21T07:52:00Z",
+      "report_num": 1,
+      "cv": { "pdf": "output/001-acme-cv.pdf", "html": "output/001-acme-cv.html" },
+      "letter": { "state": "a_completer", "why": null, "why_at": null, "pdf": null },
+      "message": "Bonjour, je vous propose ma candidature au poste de chef de produit.",
+      "answers": [ { "q": "Disponibilité ?", "a": "Sous un mois." } ],
+      "strategy": "output/001-acme-strategie.json",
+      "check": { "ok": true, "reasons": [] },
+      "retouches": []
+    },
+    "6": {
+      "state": "a_verifier",
+      "prepared_at": "2026-11-19T07:55:00Z",
+      "report_num": 6,
+      "cv": { "pdf": "output/006-foxtrot-cv.pdf", "html": "output/006-foxtrot-cv.html" },
+      "letter": { "state": "a_completer", "why": null, "why_at": null, "pdf": null },
+      "message": "Bonjour, je vous propose ma candidature au poste de responsable produit.",
+      "answers": [],
+      "strategy": "output/006-foxtrot-strategie.json",
+      "check": { "ok": false, "reasons": ["mot-clé absent : roadmap"] },
+      "retouches": []
+    }
+  }
+}

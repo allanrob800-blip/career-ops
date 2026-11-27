@@ -1,12 +1,13 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync, statSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { FIXTURE_ROOT } from './helpers.mjs';
+import { validateDossier } from '../../agents/lib/dossiers.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, '..', 'apply-requests.mjs');
@@ -69,10 +70,11 @@ test('malformed entries, bad dates and long notes are rejected; non-pending and 
     st('m4', 3, 'Applied', 'Applied', { created_at: 'not a date' }),
     req('m5', { type: 'note', ref: 3, note: 'x'.repeat(501) }),
     req('m6', { type: 'bogus', ref: 3 }),
+    req('m7', { type: ['why'], ref: 1, text: 'x' }),
     st('done', 3, 'Applied', 'Interview', { state: 'applied' }),
     { id: 'nostate', data: { type: 'status', ref: 3, from_status: 'Applied', to_status: 'Interview', created_at: '2026-11-26T18:00:00Z' } },
   ]);
-  assert.deepEqual(results.map((r) => r.id).sort(), ['m3', 'm4', 'm5', 'm6']);
+  assert.deepEqual(results.map((r) => r.id).sort(), ['m3', 'm4', 'm5', 'm6', 'm7']);
   assert.ok(results.every((r) => r.state === 'rejected' && r.reason));
   assert.equal(readTracker(), before);
 });
@@ -223,4 +225,135 @@ test('contract: the bodies CapData.requestStatus / requestNote write are accepte
   assert.deepEqual(res.results.map((r) => r.state), ['applied', 'applied'], JSON.stringify(res.results));
   assert.match(row3(), /\|\s*Interview\s*\|/);
   assert.match(row3(), /Relancer vendredi/);
+});
+
+// ---- why / retouche: the dossier store only, never the tracker ----
+const dossiersFile = () => join(root(), 'data/dossiers.json');
+const readStore = () => JSON.parse(readFileSync(dossiersFile(), 'utf8'));
+const why = (id, ref, text, extra = {}) => req(id, { type: 'why', ref, text, ...extra });
+const retouche = (id, ref, text, extra = {}) => req(id, { type: 'retouche', ref, text, ...extra });
+
+test('the dossiers fixture matches the Dossier contract', () => {
+  const store = readStore();
+  assert.equal(store.schema, 1);
+  for (const [num, d] of Object.entries(store.dossiers)) assert.equal(validateDossier(d), null, `dossier ${num}`);
+});
+
+test('a why request sets letter.why in dossiers.json, without set-status', () => {
+  const trackerMtime = statSync(join(root(), 'data/applications.md')).mtimeMs;
+  const t = readTracker(), l = readStatusLog();
+  const { results, ops } = run([why('w1', 1, '  Leur   produit sert les équipes terrain.  ', { created_at: '2026-11-26T19:00:00Z' })]);
+  assert.equal(results[0].state, 'applied', results[0].reason);
+  assert.equal(results[0].reason, null);
+  assert.ok(results[0].applied_at);
+  const d = readStore().dossiers['1'];
+  assert.equal(d.letter.why, 'Leur produit sert les équipes terrain.');
+  assert.equal(d.letter.why_at, '2026-11-26T19:00:00Z');
+  assert.equal(d.state, 'pret');
+  assert.equal(validateDossier(d), null);
+  assert.equal(statSync(join(root(), 'data/applications.md')).mtimeMs, trackerMtime);
+  assert.equal(readTracker(), t);
+  assert.equal(readStatusLog(), l);
+  assert.deepEqual(Object.keys(ops[0].data).sort(), ['applied_at', 'reason', 'state']);
+});
+
+test('why / retouche texts with a line break, over 500 characters, a control character or empty are rejected', () => {
+  const before = readFileSync(dossiersFile(), 'utf8');
+  const { results } = run([
+    why('t1', 1, 'Première ligne\nseconde ligne'),
+    why('t2', 1, 'x'.repeat(501)),
+    retouche('t3', 1, 'Ajouter\u0007 un chiffre'),
+    retouche('t4', 1, '   '),
+    why('t5', 1, ''),
+    why('t6', 1, 42),
+    retouche('t7', 1, undefined),
+  ]);
+  assert.deepEqual(results.map((r) => [r.id, r.state]), ['t1', 't2', 't3', 't4', 't5', 't6', 't7'].map((id) => [id, 'rejected']));
+  assert.ok(results.every((r) => typeof r.reason === 'string' && r.reason && r.applied_at === null), JSON.stringify(results));
+  assert.match(results[0].reason, /control/);
+  assert.match(results[1].reason, /500/);
+  assert.equal(readFileSync(dossiersFile(), 'utf8'), before);
+});
+
+test('a why / retouche request for an application without a dossier is rejected', () => {
+  const before = readFileSync(dossiersFile(), 'utf8');
+  const { results } = run([why('nd1', 2, 'Une bonne raison.'), retouche('nd2', 3, 'Raccourcir le message.')]);
+  assert.deepEqual(results.map((r) => [r.state, r.reason]), [
+    ['rejected', 'no dossier for this application'],
+    ['rejected', 'no dossier for this application'],
+  ]);
+  assert.equal(readFileSync(dossiersFile(), 'utf8'), before);
+});
+
+test('no dossiers.json at all: the request is rejected, nothing is created', () => {
+  rmSync(dossiersFile());
+  const { results } = run([why('nf', 1, 'Une bonne raison.')]);
+  assert.equal(results[0].state, 'rejected');
+  assert.equal(results[0].reason, 'no dossier for this application');
+  assert.equal(existsSync(dossiersFile()), false);
+});
+
+test('a retouche request appends the entry and sends the dossier back to a_refaire', () => {
+  const { results } = run([retouche('rt1', 6, 'Mettre la roadmap en avant.', { created_at: '2026-11-26T20:15:00Z' })]);
+  assert.equal(results[0].state, 'applied', results[0].reason);
+  const store = readStore();
+  const d = store.dossiers['6'];
+  assert.equal(d.state, 'a_refaire');
+  assert.deepEqual(d.retouches, [{ text: 'Mettre la roadmap en avant.', at: '2026-11-26T20:15:00Z', done_at: null }]);
+  assert.equal(validateDossier(d), null);
+  assert.equal(store.dossiers['1'].state, 'pret'); // the other dossier is untouched
+});
+
+test('mixed batch: created_at order, one write of the store, status still through set-status', () => {
+  const { results } = run([
+    retouche('m-b', 1, 'Second ajout.', { created_at: '2026-11-26T18:02:00Z' }),
+    st('m-s', 3, 'Applied', 'Interview', { created_at: '2026-11-26T18:01:00Z' }),
+    retouche('m-a', 1, 'Premier ajout.', { created_at: '2026-11-26T18:00:00Z' }),
+    why('m-w', 1, 'Raison.', { created_at: '2026-11-26T18:03:00Z' }),
+    why('m-x', 2, 'Sans dossier.', { created_at: '2026-11-26T18:04:00Z' }),
+  ]);
+  assert.deepEqual(results.map((r) => [r.id, r.state]), [
+    ['m-a', 'applied'], ['m-s', 'applied'], ['m-b', 'applied'], ['m-w', 'applied'], ['m-x', 'rejected'],
+  ]);
+  const d = readStore().dossiers['1'];
+  assert.deepEqual(d.retouches.map((r) => r.text), ['Premier ajout.', 'Second ajout.']);
+  assert.equal(d.letter.why, 'Raison.');
+  assert.equal(d.state, 'a_refaire');
+  assert.match(row3(), /\|\s*Interview\s*\|/);
+  const leftovers = readdirSync(join(root(), 'data')).filter((f) => f.endsWith('.tmp'));
+  assert.deepEqual(leftovers, []);
+});
+
+test('--dry-run: why / retouche give would_apply and write nothing', () => {
+  const before = readFileSync(dossiersFile(), 'utf8');
+  const res = run([why('d1', 1, 'Une bonne raison.'), retouche('d2', 6, 'Raccourcir.'), why('d3', 2, 'Sans dossier.')], ['--dry-run']);
+  assert.deepEqual(res.results.map((r) => [r.id, r.state]), [['d1', 'would_apply'], ['d2', 'would_apply'], ['d3', 'rejected']]);
+  assert.ok(res.results.slice(0, 2).every((r) => r.reason === null && r.applied_at === null));
+  assert.deepEqual(res.ops, []);
+  assert.equal(readFileSync(dossiersFile(), 'utf8'), before);
+});
+
+test('an unreadable dossiers.json rejects the why / retouche requests and is left as is', () => {
+  writeFileSync(dossiersFile(), '{ not json');
+  const { results } = run([why('u1', 1, 'Une bonne raison.'), st('u2', 3, 'Applied', 'Interview')]);
+  assert.equal(results.find((r) => r.id === 'u1').state, 'rejected');
+  assert.match(results.find((r) => r.id === 'u1').reason, /dossiers\.json/);
+  assert.equal(results.find((r) => r.id === 'u2').state, 'applied');
+  assert.equal(readFileSync(dossiersFile(), 'utf8'), '{ not json');
+});
+
+// Contract with the page: the object CapData.requestWhy / requestRetouche will write (plan, task 5):
+// {type, ref, text, created_at, state: 'pending'}, read back through db_query.
+test('contract: the why / retouche bodies the page writes are accepted by apply-requests', () => {
+  const created_at = new Date().toISOString();
+  const bodies = [
+    { id: 'p-why', data: { type: 'why', ref: 1, text: 'Leur produit sert les équipes terrain.', created_at, state: 'pending' } },
+    { id: 'p-ret', data: { type: 'retouche', ref: 1, text: 'Ajouter un chiffre clé.', created_at, state: 'pending' } },
+  ];
+  const res = run(lines(bodies));
+  assert.deepEqual(res.results.map((r) => [r.id, r.state]), [['p-ret', 'applied'], ['p-why', 'applied']], JSON.stringify(res.results));
+  assert.deepEqual(res.ops.map((o) => [o.path, o.ifVersion]), [['requests/p-ret', 8], ['requests/p-why', 7]]);
+  const d = readStore().dossiers['1'];
+  assert.equal(d.letter.why, 'Leur produit sert les équipes terrain.');
+  assert.equal(d.retouches.at(-1).text, 'Ajouter un chiffre clé.');
 });

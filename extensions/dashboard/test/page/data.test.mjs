@@ -102,8 +102,17 @@ test('absent window.claude is treated as unavailable', async () => {
   } finally { await p.close(); }
 });
 
+// A complete generation whose apps carry statuses (rows 3 and 4 Applied, 5 Interview).
+function withApps(apps) {
+  return {
+    'snapshot/meta': { schema: 1, generation: 'gs', generated_at: '2026-11-26T10:00:00Z', profile: {}, stats: {}, timeline: [], followups_due: [], companies: [], parts: ['snapshot/apps-gs-0'] },
+    'snapshot/apps-gs-0': { generation: 'gs', items: apps },
+  };
+}
+const APPS = [{ num: 3, company: 'Cobalt', status: 'Applied' }, { num: 4, company: 'Delta', status: 'Applied' }, { num: 5, company: 'Echo', status: 'Interview' }];
+
 test('requestStatus writes a pending request; validation rejects bad input', async () => {
-  const p = await open({});
+  const p = await open(withApps(APPS));
   try {
     await settle(p);
     await p.page.evaluate(() => CapData.requestStatus(3, 'Interview'));
@@ -115,7 +124,7 @@ test('requestStatus writes a pending request; validation rejects bad input', asy
     assert.equal(reqs.length, 2);
     const st = reqs.find((r) => r.type === 'status');
     assert.match(st.id, /^[0-9a-f-]{36}$/);
-    assert.deepEqual({ ref: st.ref, to_status: st.to_status, state: st.state }, { ref: 3, to_status: 'Interview', state: 'pending' });
+    assert.deepEqual({ ref: st.ref, from_status: st.from_status, to_status: st.to_status, state: st.state }, { ref: 3, from_status: 'Applied', to_status: 'Interview', state: 'pending' });
     assert.ok(!Number.isNaN(Date.parse(st.created_at)));
     const nt = reqs.find((r) => r.type === 'note');
     assert.deepEqual({ ref: nt.ref, note: nt.note, state: nt.state }, { ref: 4, note: 'Relancer vendredi', state: 'pending' });
@@ -125,12 +134,13 @@ test('requestStatus writes a pending request; validation rejects bad input', asy
     const bad = await p.page.evaluate(async () => {
       const out = [];
       for (const f of [() => CapData.requestStatus(0, 'Interview'), () => CapData.requestStatus(1.5, 'Interview'), () => CapData.requestStatus(1, 'Nope'),
-        () => CapData.requestNote(1, ''), () => CapData.requestNote(1, 'x'.repeat(501)), () => CapData.requestNote(1, 'a\u0007b'), () => CapData.requestNote('2', 'ok')]) {
+        () => CapData.requestNote(1, ''), () => CapData.requestNote(1, ' \n\t '), () => CapData.requestNote(1, 'x'.repeat(501)), () => CapData.requestNote(1, 'a\u0007b'), () => CapData.requestNote('2', 'ok'),
+        () => CapData.requestStatus(99, 'Interview')]) {
         try { await f(); out.push('ok'); } catch (e) { out.push(e instanceof Error ? 'error' : 'other'); }
       }
       return out;
     });
-    assert.deepEqual(bad, Array(7).fill('error'));
+    assert.deepEqual(bad, Array(9).fill('error'));
     assert.equal(await p.page.evaluate(async () => (await (await claude.use('db')).collection('requests').get()).size), 2);
   } finally { await p.close(); }
 });
@@ -249,5 +259,51 @@ test('savePrefs before the first prefs delivery merges onto the stored doc', asy
     assert.deepEqual(body, { weekly_goal: 7, accent: 'ocean', reduced_motion: false });
     await p.page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
     assert.deepEqual((await last(p)).prefs, body);
+  } finally { await p.close(); }
+});
+
+test('from_status: the target of the row\'s latest pending status request, else the snapshot status', async () => {
+  const p = await open({ ...withApps(APPS),
+    'requests/old': { type: 'status', ref: 4, from_status: 'Applied', to_status: 'Responded', created_at: '2026-11-25T08:00:00Z', state: 'pending' },
+    'requests/done': { type: 'status', ref: 4, from_status: 'Responded', to_status: 'Offer', created_at: '2026-11-25T09:00:00Z', state: 'applied', applied_at: '2026-11-25T10:00:00Z' },
+  });
+  try {
+    await settle(p);
+    // two requests in a row, without waiting for the listener: the second chains on the first
+    await p.page.evaluate(() => Promise.all([CapData.requestStatus(3, 'Interview'), CapData.requestStatus(3, 'Offer')]));
+    await p.page.evaluate(() => CapData.requestStatus(4, 'Interview'));
+    await p.page.evaluate(() => CapData.requestStatus(5, 'Offer'));
+    const reqs = await p.page.evaluate(async () => (await (await claude.use('db')).collection('requests').get()).docs.map((d) => d.data()));
+    const mine = reqs.filter((r) => r.state === 'pending' && r.created_at > '2026-11-26').sort((a, b) => a.created_at.localeCompare(b.created_at) || a.to_status.localeCompare(b.to_status));
+    const pairs = mine.map((r) => `${r.ref}:${r.from_status}>${r.to_status}`);
+    assert.deepEqual(pairs.filter((x) => x.startsWith('3:')), ['3:Applied>Interview', '3:Interview>Offer']);
+    assert.deepEqual(pairs.filter((x) => !x.startsWith('3:')), ['4:Responded>Interview', '5:Interview>Offer']);
+    assert.equal(await p.page.evaluate(() => CapData.expectedStatus(3)), 'Offer');
+    assert.equal(await p.page.evaluate(() => CapData.expectedStatus(99)), null);
+  } finally { await p.close(); }
+});
+
+test('requestNote: a Return (or any whitespace run) becomes one space before the checks', async () => {
+  const p = await open(withApps(APPS));
+  try {
+    await settle(p);
+    await p.page.evaluate(() => CapData.requestNote(3, '  Relancer\nvendredi\r\n\tmerci  '));
+    await p.page.evaluate(() => CapData.requestNote(3, `a${' '.repeat(600)}b`));
+    const notes = await p.page.evaluate(async () => (await (await claude.use('db')).collection('requests').get()).docs.map((d) => d.data().note).sort());
+    assert.deepEqual(notes, ['Relancer vendredi merci', 'a b']);
+  } finally { await p.close(); }
+});
+
+test('weekly_goal is kept within 1-10, like the settings screen', async () => {
+  const p = await open({ ...withApps(APPS), 'settings/prefs': { weekly_goal: 50, accent: 'corail', reduced_motion: false } });
+  try {
+    await settle(p);
+    assert.equal((await last(p)).prefs.weekly_goal, 10);
+    const r = await p.page.evaluate(async () => {
+      const out = [];
+      for (const v of [11, 10, 1]) { try { await CapData.savePrefs({ weekly_goal: v }); out.push('ok'); } catch { out.push('error'); } }
+      return out;
+    });
+    assert.deepEqual(r, ['error', 'ok', 'ok']);
   } finally { await p.close(); }
 });

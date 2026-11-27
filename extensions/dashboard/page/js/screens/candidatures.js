@@ -126,17 +126,20 @@
     dlg.el.querySelector('#form-status').addEventListener('submit', async (e) => {
       e.preventDefault();
       const to = dlg.el.querySelector('#detail-status').value;
-      if (to === a.status) { showErr('#err-status', 'C\'est déjà le statut actuel.'); return; }
+      const expected = (CapData.expectedStatus && CapData.expectedStatus(num)) || a.status; // a pending request counts
+      if (to === expected) { showErr('#err-status', to === a.status ? 'C\'est déjà le statut actuel.' : 'Ce statut est déjà demandé.'); return; }
       showErr('#err-status', '');
       try { await CapData.requestStatus(num, to); CapUI.toast('Demande enregistrée : Claude l\'appliquera à la prochaine session.'); }
       catch (err) { showErr('#err-status', (err && err.message) || 'La demande n\'a pas pu être enregistrée.'); }
     });
     const ta = dlg.el.querySelector('#detail-note');
-    ta.addEventListener('input', () => { dlg.el.querySelector('#note-left').textContent = `${500 - ta.value.length} caractères restants`; });
+    const left = dlg.el.querySelector('#note-left');
+    const LEFT0 = left.textContent;
+    ta.addEventListener('input', () => { left.textContent = `${500 - ta.value.length} caractères restants`; });
     dlg.el.querySelector('#form-note').addEventListener('submit', async (e) => {
       e.preventDefault();
       showErr('#err-note', '');
-      try { await CapData.requestNote(num, ta.value); ta.value = ''; CapUI.toast('Note enregistrée : Claude l\'ajoutera à la prochaine session.'); }
+      try { await CapData.requestNote(num, ta.value); ta.value = ''; left.textContent = LEFT0; CapUI.toast('Note enregistrée : Claude l\'ajoutera à la prochaine session.'); }
       catch (err) { showErr('#err-note', (err && err.message) || 'La note n\'a pas pu être enregistrée.'); }
     });
   }

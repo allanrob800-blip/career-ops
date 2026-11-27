@@ -8,6 +8,7 @@
   'use strict';
 
   const DEFAULT_PREFS = Object.freeze({ weekly_goal: 3, accent: 'corail', reduced_motion: false });
+  const GOAL_MIN = 1, GOAL_MAX = 10; // the settings screen's range
   const STATUSES = ['Evaluated', 'Speculative', 'Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
   const CONTROL = /[\u0000-\u001F\u007F]/;
   const LOADING_MS = 10000;
@@ -38,7 +39,7 @@
   function normPrefs(body) {
     const out = { ...DEFAULT_PREFS };
     if (isObj(body)) {
-      if (Number.isInteger(body.weekly_goal) && body.weekly_goal >= 1 && body.weekly_goal <= 100) out.weekly_goal = body.weekly_goal;
+      if (Number.isInteger(body.weekly_goal)) out.weekly_goal = Math.min(GOAL_MAX, Math.max(GOAL_MIN, body.weekly_goal));
       if (typeof body.accent === 'string' && body.accent && body.accent.length <= 32) out.accent = body.accent;
       if (typeof body.reduced_motion === 'boolean') out.reduced_motion = body.reduced_motion;
     }
@@ -55,7 +56,7 @@
       const id = path.split('/')[1];
       const part = id && snapDocs.get(id);
       if (!isObj(part) || part.generation !== meta.generation || !Array.isArray(part.items)) return null;
-      const kind = id.replace(/-\d+$/, '');
+      const kind = id.split('-')[0]; // <kind>-<genId>-<n> (or the older <kind>-<n>)
       if (!(kind in out)) return null;
       out[kind] = out[kind].concat(part.items);
     }
@@ -138,7 +139,7 @@
       snapDocs = bodies(qs);
       if (!qs.metadata || !qs.metadata.fromCache) { snapLive = true; failed = false; clearTimer(); }
     });
-    listen('requests', (n, e) => db.collection('requests').onSnapshot(n, e), (qs) => { reqDocs = bodies(qs); });
+    listen('requests', (n, e) => db.collection('requests').onSnapshot(n, e), (qs) => { reqDocs = bodies(qs); for (const id of reqDocs.keys()) ownReqs.delete(id); });
     listen('handled', (n, e) => db.collection('handled').onSnapshot(n, e), (qs) => { handledBodies = bodies(qs); });
     listen('prefs', (n, e) => db.doc('settings/prefs').onSnapshot(n, e), (s) => { prefsBody = s.exists ? s.data() : null; prefsCur = normPrefs(prefsBody); prefsSeen = true; });
   }
@@ -186,39 +187,71 @@
     }
   }
 
-  async function writeRequest(body) {
-    const d = await getDb();
+  // Requests written by this page that the listener may not have delivered yet (id -> body).
+  const ownReqs = new Map();
+
+  async function writeRequest(d, body) {
     const id = crypto.randomUUID();
-    await serial(`requests/${id}`, () => writeWithRetry(() => d.collection('requests').doc(id).set(body)));
+    ownReqs.set(id, body);
+    try { await serial(`requests/${id}`, () => writeWithRetry(() => d.collection('requests').doc(id).set(body))); }
+    catch (e) { ownReqs.delete(id); throw e; }
+  }
+
+  // The status the row will have once Claude applies what is already asked: the target of its latest
+  // still-pending status request, else its status in the snapshot. null when the row is unknown.
+  function expectedStatus(ref) {
+    let best = null;
+    const seen = new Set();
+    const consider = (id, b) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      if (!isObj(b) || b.state !== 'pending' || b.type !== 'status' || b.ref !== ref || !STATUSES.includes(b.to_status)) return;
+      const t = str(b.created_at) || '';
+      if (!best || t > best.t || (t === best.t && id > best.id)) best = { t, id, to: b.to_status };
+    };
+    for (const [id, b] of reqDocs) consider(id, b);
+    for (const [id, b] of ownReqs) consider(id, b);
+    if (best) return best.to;
+    const snap = kept || assemble();
+    const app = snap && Array.isArray(snap.apps) ? snap.apps.find((a) => isObj(a) && a.num === ref) : null;
+    return app && STATUSES.includes(app.status) ? app.status : null;
   }
 
   function checkRef(ref) {
     if (!Number.isInteger(ref) || ref < 1) throw new Error('Référence de candidature invalide');
   }
 
+  // from_status is read and the request written one at a time, so a second request chains on the first.
   function requestStatus(ref, to_status) {
     try {
       checkRef(ref);
       if (!STATUSES.includes(to_status)) throw new Error('Statut inconnu');
     } catch (e) { return Promise.reject(e); }
-    return writeRequest({ type: 'status', ref, to_status, created_at: new Date().toISOString(), state: 'pending' });
+    return getDb().then((d) => serial('requests:status', async () => {
+      const from_status = expectedStatus(ref);
+      if (!from_status) throw new Error('Candidature introuvable dans les données synchronisées');
+      await writeRequest(d, { type: 'status', ref, from_status, to_status, created_at: new Date().toISOString(), state: 'pending' });
+    }));
   }
 
-  function requestNote(ref, note) {
+  function requestNote(ref, raw) {
+    let note;
     try {
       checkRef(ref);
-      if (typeof note !== 'string' || !note.trim()) throw new Error('Note vide');
+      if (typeof raw !== 'string') throw new Error('Note vide');
+      note = raw.replace(/\s+/g, ' ').trim(); // a Return in the field is a space in the tracker's one-line cell
+      if (!note) throw new Error('Note vide');
       if (note.length > 500) throw new Error('Note trop longue (500 caractères maximum)');
       if (CONTROL.test(note)) throw new Error('Note : caractères de contrôle interdits');
     } catch (e) { return Promise.reject(e); }
-    return writeRequest({ type: 'note', ref, note, created_at: new Date().toISOString(), state: 'pending' });
+    return getDb().then((d) => writeRequest(d, { type: 'note', ref, note, created_at: new Date().toISOString(), state: 'pending' }));
   }
 
   function savePrefs(partial) {
     try {
       if (!isObj(partial)) throw new Error('Préférences invalides');
       for (const [k, v] of Object.entries(partial)) {
-        if (k === 'weekly_goal') { if (!Number.isInteger(v) || v < 1 || v > 100) throw new Error('Objectif hebdomadaire invalide'); }
+        if (k === 'weekly_goal') { if (!Number.isInteger(v) || v < GOAL_MIN || v > GOAL_MAX) throw new Error('Objectif hebdomadaire invalide'); }
         else if (k === 'accent') { if (typeof v !== 'string' || !v || v.length > 32 || CONTROL.test(v)) throw new Error('Accent invalide'); }
         else if (k === 'reduced_motion') { if (typeof v !== 'boolean') throw new Error('Mouvement réduit invalide'); }
         else throw new Error(`Préférence inconnue : ${k}`);
@@ -275,5 +308,5 @@
     onChange = null;
   }
 
-  globalThis.CapData = { start, stop, getState: currentState, requestStatus, requestNote, savePrefs, markHandled, handledIds, encodeSeg, STATUSES };
+  globalThis.CapData = { start, stop, getState: currentState, requestStatus, requestNote, expectedStatus, savePrefs, markHandled, handledIds, encodeSeg, STATUSES };
 })();

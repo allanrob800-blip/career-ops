@@ -127,13 +127,22 @@ test('Candidatures: status filter, detail sheet, status request -> pending doc +
     assert.deepEqual(options, ['Evaluated', 'Speculative', 'Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP']);
     await dlg.locator('#detail-status').selectOption('Interview');
     await dlg.locator('#detail-status-send').click();
-    await p.page.waitForFunction(() => Object.entries(window.__fake.db.docs).some(([k, v]) => k.startsWith('requests/') && v.ref === 3 && v.to_status === 'Interview' && v.state === 'pending' && v.type === 'status'));
+    await p.page.waitForFunction(() => Object.entries(window.__fake.db.docs).some(([k, v]) => k.startsWith('requests/') && v.ref === 3 && v.from_status === 'Applied' && v.to_status === 'Interview' && v.state === 'pending' && v.type === 'status'));
     await p.page.waitForFunction(() => /En attente de synchronisation/.test(document.querySelector('#app-list [data-num="3"]')?.textContent || ''));
     assert.match(await dlg.innerText(), /En attente de synchronisation/);
-    // note: invalid (empty) is refused inline, valid one is written
-    await dlg.locator('#detail-note').fill('Relancer après le salon');
+    // a second request on the same row chains on the pending one; asking for the pending target again is refused
+    await dlg.locator('#detail-status').selectOption('Interview');
+    await dlg.locator('#detail-status-send').click();
+    assert.match(await dlg.locator('#err-status').innerText(), /déjà/);
+    // note: typed with a Return, sent as one line; the counter starts over
+    await dlg.locator('#detail-note').fill('Relancer après');
+    await dlg.locator('#detail-note').press('Enter');
+    await dlg.locator('#detail-note').pressSequentially('le salon');
+    assert.match(await dlg.locator('#note-left').innerText(), /restants/);
     await dlg.locator('#detail-note-send').click();
     await p.page.waitForFunction(() => Object.values(window.__fake.db.docs).some((v) => v.type === 'note' && v.ref === 3 && v.note === 'Relancer après le salon'));
+    await p.page.waitForFunction(() => document.querySelector('#detail-note').value === '' && document.querySelector('#note-left').textContent === '500 caractères au plus');
+    assert.equal(await dlg.locator('#err-note').isVisible(), false);
     assert.deepEqual(p.errors, []);
   } finally { await p.close(); }
 });

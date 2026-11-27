@@ -1034,3 +1034,64 @@ for (const width of [360, 430]) {
     } finally { await p.close(); }
   });
 }
+
+// final wave F8: a request button is disabled while its request is in flight (double click = one request), and
+// enabled again when the request fails.
+const slowRequests = (p) => p.page.evaluate(() => {
+  window.__slow = { failNext: false };
+  for (const name of ['requestWhy', 'requestRetouche', 'requestStatus', 'requestNote']) {
+    const orig = CapData[name];
+    CapData[name] = async (...args) => {
+      await new Promise((r) => setTimeout(r, 250));
+      if (window.__slow.failNext) { window.__slow.failNext = false; throw new Error('Réseau indisponible'); }
+      return orig(...args);
+    };
+  }
+});
+
+test('Espace CV and sheet: a double click on why, retouche, refusal, status or note writes one request', async () => {
+  const p = await openCv({ docs: withDossier(1) });
+  try {
+    await slowRequests(p);
+    const dlg = await openSheet(p, 1);
+    const count = async (type) => (await requests(p)).filter((r) => r.type === type).length;
+    await dlg.locator('#detail-why').fill('Leur produit sert les équipes terrain.');
+    await dlg.locator('#why-send').dblclick();
+    await dlg.locator('#form-why .req-done').waitFor();
+    await dlg.locator('#detail-retouche').fill('Mettre la roadmap en avant');
+    await dlg.locator('#retouche-send').dblclick();
+    await dlg.locator('#form-retouche .req-done').waitFor();
+    await dlg.locator('#detail-note').fill('Relancer après le salon');
+    await dlg.locator('#detail-note-send').dblclick();
+    await p.page.waitForFunction(() => document.querySelector('#detail-note').value === '');
+    await dlg.locator('#detail-status').selectOption('Applied');
+    await dlg.locator('#detail-status-send').dblclick();
+    await p.page.waitForFunction(() => !document.querySelector('#detail-status-send').disabled);
+    await p.page.waitForTimeout(400);
+    assert.deepEqual([await count('why'), await count('retouche'), await count('note'), await count('status')], [1, 1, 1, 1]);
+    await dlg.locator('#refuse-btn').click();
+    await dlg.locator('#refuse-confirm').dblclick();
+    await dlg.locator('#refuse .req-done').waitFor();
+    await p.page.waitForTimeout(400);
+    assert.equal((await requests(p)).filter((r) => r.type === 'status' && r.to_status === 'Discarded').length, 1);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Sheet: a failed note request enables its button again; the retry writes one note', async () => {
+  const p = await openCv({ docs: withDossier(1) });
+  try {
+    await slowRequests(p);
+    const dlg = await openSheet(p, 1);
+    await p.page.evaluate(() => { window.__slow.failNext = true; });
+    await dlg.locator('#detail-note').fill('Relancer après le salon');
+    await dlg.locator('#detail-note-send').click();
+    assert.equal(await dlg.locator('#detail-note-send').isDisabled(), true, 'disabled while in flight');
+    await dlg.locator('#err-note').waitFor();
+    assert.match(await dlg.locator('#err-note').innerText(), /Réseau indisponible/);
+    assert.equal(await dlg.locator('#detail-note-send').isDisabled(), false, 'enabled again after the failure');
+    await dlg.locator('#detail-note-send').click();
+    await p.page.waitForFunction(() => document.querySelector('#detail-note').value === '');
+    assert.equal((await requests(p)).filter((r) => r.type === 'note').length, 1);
+  } finally { await p.close(); }
+});

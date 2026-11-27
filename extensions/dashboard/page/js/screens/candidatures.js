@@ -239,6 +239,19 @@
   }
 
   // The Espace CV's controls: downloads (only where the host can save files), copy, why, retouche, two-step refusal.
+  // Runs one request with its button disabled: a second click (or Return) while it is in flight does nothing.
+  // The button is enabled again afterwards when it is still on the page (a failure leaves the form in place).
+  async function inFlight(btn, run) {
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    try { await run(); } finally {
+      if (btn.isConnected) {
+        btn.disabled = false;
+        if (document.activeElement === document.body && !btn.closest('[hidden]')) btn.focus();
+      }
+    }
+  }
+
   function bindCvSpace(dlg, a, num, showErr) {
     const space = dlg.el.querySelector('.cv-space');
     if (!space) return;
@@ -268,14 +281,17 @@
     // why / retouche: one line of text each; once written, the form gives way to « Envoyé. … »
     const textForm = (form, field, err, send, done) => {
       if (!form) return;
-      form.addEventListener('submit', async (e) => {
+      const btn = form.querySelector('button[type=submit]');
+      form.addEventListener('submit', (e) => {
         e.preventDefault();
-        showErr(err, '');
-        try {
-          await send(num, form.querySelector(field).value);
-          form.innerHTML = `<p class="req-done" role="status" tabindex="-1">${CapUI.esc(done)}</p>`;
-          form.querySelector('.req-done').focus();
-        } catch (ex) { showErr(err, (ex && ex.message) || 'La demande n\'a pas pu être enregistrée.'); }
+        inFlight(btn, async () => {
+          showErr(err, '');
+          try {
+            await send(num, form.querySelector(field).value);
+            form.innerHTML = `<p class="req-done" role="status" tabindex="-1">${CapUI.esc(done)}</p>`;
+            form.querySelector('.req-done').focus();
+          } catch (ex) { showErr(err, (ex && ex.message) || 'La demande n\'a pas pu être enregistrée.'); }
+        });
       });
     };
     textForm(space.querySelector('#form-why'), '#detail-why', '#err-why', CapData.requestWhy, 'Envoyé. Claude écrira la lettre à la prochaine session.');
@@ -287,7 +303,8 @@
     const step = (confirming) => { ask.hidden = confirming; confirmRow.hidden = !confirming; };
     refuse.querySelector('#refuse-btn').addEventListener('click', () => { showErr('#err-refuse', ''); step(true); refuse.querySelector('#refuse-cancel').focus(); });
     refuse.querySelector('#refuse-cancel').addEventListener('click', () => { step(false); refuse.querySelector('#refuse-btn').focus(); });
-    refuse.querySelector('#refuse-confirm').addEventListener('click', async () => {
+    const confirmBtn = refuse.querySelector('#refuse-confirm');
+    confirmBtn.addEventListener('click', () => inFlight(confirmBtn, async () => {
       const expected = (CapData.expectedStatus && CapData.expectedStatus(num)) || a.status;
       if (expected === 'Discarded') { step(false); showErr('#err-refuse', a.status === 'Discarded' ? 'C\'est déjà le statut actuel.' : 'Ce statut est déjà demandé.'); return; }
       try {
@@ -295,7 +312,7 @@
         refuse.innerHTML = '<p class="req-done" role="status" tabindex="-1">Refus demandé : Claude l\'appliquera à la prochaine session.</p>';
         refuse.querySelector('.req-done').focus();
       } catch (err) { step(false); showErr('#err-refuse', (err && err.message) || 'La demande n\'a pas pu être enregistrée.'); }
-    });
+    }));
   }
 
   function openDetail(num) {
@@ -361,24 +378,30 @@
     }
     const showErr = (id, msg) => { const e = dlg.el.querySelector(id); e.textContent = msg; e.hidden = !msg; };
     bindCvSpace(dlg, a, num, showErr);
-    dlg.el.querySelector('#form-status').addEventListener('submit', async (e) => {
+    const statusBtn = dlg.el.querySelector('#detail-status-send');
+    dlg.el.querySelector('#form-status').addEventListener('submit', (e) => {
       e.preventDefault();
-      const to = dlg.el.querySelector('#detail-status').value;
-      const expected = (CapData.expectedStatus && CapData.expectedStatus(num)) || a.status; // a pending request counts
-      if (to === expected) { showErr('#err-status', to === a.status ? 'C\'est déjà le statut actuel.' : 'Ce statut est déjà demandé.'); return; }
-      showErr('#err-status', '');
-      try { await CapData.requestStatus(num, to); CapUI.toast('Demande enregistrée : Claude l\'appliquera à la prochaine session.'); }
-      catch (err) { showErr('#err-status', (err && err.message) || 'La demande n\'a pas pu être enregistrée.'); }
+      inFlight(statusBtn, async () => {
+        const to = dlg.el.querySelector('#detail-status').value;
+        const expected = (CapData.expectedStatus && CapData.expectedStatus(num)) || a.status; // a pending request counts
+        if (to === expected) { showErr('#err-status', to === a.status ? 'C\'est déjà le statut actuel.' : 'Ce statut est déjà demandé.'); return; }
+        showErr('#err-status', '');
+        try { await CapData.requestStatus(num, to); CapUI.toast('Demande enregistrée : Claude l\'appliquera à la prochaine session.'); }
+        catch (err) { showErr('#err-status', (err && err.message) || 'La demande n\'a pas pu être enregistrée.'); }
+      });
     });
     const ta = dlg.el.querySelector('#detail-note');
     const left = dlg.el.querySelector('#note-left');
     const LEFT0 = left.textContent;
     ta.addEventListener('input', () => { left.textContent = `${500 - ta.value.length} caractères restants`; });
-    dlg.el.querySelector('#form-note').addEventListener('submit', async (e) => {
+    const noteBtn = dlg.el.querySelector('#detail-note-send');
+    dlg.el.querySelector('#form-note').addEventListener('submit', (e) => {
       e.preventDefault();
-      showErr('#err-note', '');
-      try { await CapData.requestNote(num, ta.value); ta.value = ''; left.textContent = LEFT0; CapUI.toast('Note enregistrée : Claude l\'ajoutera à la prochaine session.'); }
-      catch (err) { showErr('#err-note', (err && err.message) || 'La note n\'a pas pu être enregistrée.'); }
+      inFlight(noteBtn, async () => {
+        showErr('#err-note', '');
+        try { await CapData.requestNote(num, ta.value); ta.value = ''; left.textContent = LEFT0; CapUI.toast('Note enregistrée : Claude l\'ajoutera à la prochaine session.'); }
+        catch (err) { showErr('#err-note', (err && err.message) || 'La note n\'a pas pu être enregistrée.'); }
+      });
     });
   }
 

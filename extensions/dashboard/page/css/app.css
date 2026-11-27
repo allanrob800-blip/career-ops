@@ -1,0 +1,133 @@
+/*
+ * VOICE: calm, direct French; a quiet co-pilot that names the next step, never nags.
+ * IDEA: a "cap" (heading) — one bearing for the day, everything else orbits around it.
+ * PICTURE: warm dawn light seen through frosted glass; soft blobs of coral and amber behind panels.
+ * COLOUR: warm paper / deep aubergine neutrals, one accent (--acc, coral #ff5a4e), status colours kept muted.
+ * TYPE: Fraunces for headings (soft, characterful serif), Manrope for text and numbers.
+ * LAYOUT: one column on phones with a bottom tab bar; side menu + roomy content column from 900px up.
+ */
+@property --acc { syntax: '<color>'; inherits: true; initial-value: #ff5a4e; }
+
+:root {
+  color-scheme: light dark;
+  --acc: #ff5a4e;
+  --bg: light-dark(#fbf4ec, #17121a);
+  --bg-blob1: light-dark(#ffd9c2, #4a1f33);
+  --bg-blob2: light-dark(#ffe9b8, #2a2150);
+  --text: light-dark(#2a2024, #f4ece6);
+  --muted: light-dark(#6f5f63, #b7a9ae);
+  --glass: light-dark(rgb(255 255 255 / .62), rgb(40 30 46 / .58));
+  --glass-solid: light-dark(#fffaf5, #261d2b);
+  --line: light-dark(rgb(60 30 30 / .12), rgb(255 235 235 / .14));
+  --shadow: light-dark(0 10px 30px rgb(120 60 40 / .12), 0 10px 30px rgb(0 0 0 / .4));
+  --r: 22px;
+  --gutter: 16px;
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-text: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+:root[data-theme=light] { color-scheme: light; }
+:root[data-theme=dark] { color-scheme: dark; }
+
+*, *::before, *::after { box-sizing: border-box; min-width: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font: 400 16px/1.5 var(--font-text);
+  overflow-x: clip;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: calc(76px + env(safe-area-inset-bottom));
+}
+h1 { font: 700 clamp(1.7rem, 5vw, 2.4rem)/1.1 var(--font-display); margin: 0 0 1rem; letter-spacing: -.01em; }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; border-radius: 10px; }
+
+/* warm blurred background */
+.backdrop { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.backdrop::before, .backdrop::after {
+  content: ''; position: absolute; border-radius: 50%; filter: blur(70px); opacity: .85;
+}
+.backdrop::before { width: 60vmax; height: 60vmax; left: -15vmax; top: -20vmax; background: var(--bg-blob1); }
+.backdrop::after { width: 50vmax; height: 50vmax; right: -15vmax; bottom: -15vmax; background: var(--bg-blob2); }
+
+/* frosted glass */
+.glass {
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  backdrop-filter: blur(18px) saturate(1.5);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .glass, #nav { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* content */
+#main { padding: 20px var(--gutter) 24px; max-width: 1100px; margin: 0 auto; }
+[hidden] { display: none !important; }
+.screen-body { display: grid; gap: 14px; }
+
+/* navigation: bottom tab bar (< 900px) */
+#nav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  backdrop-filter: blur(18px) saturate(1.5);
+  border-top: 1px solid var(--line);
+}
+#nav .brand { display: none; }
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; gap: 2px; justify-content: space-around; }
+.nav-list li { flex: 1 1 0; }
+.nav-extra { display: none; }
+.nav-item {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  width: 100%; min-height: 56px; min-width: 44px; padding: 4px 2px;
+  border: 0; background: none; color: var(--muted); font: 600 11px/1.1 var(--font-text);
+  text-decoration: none; border-radius: 16px; cursor: pointer;
+  transition: background-color .2s, color .2s;
+}
+.nav-item svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.nav-item[aria-current=page], .nav-item.is-active { color: var(--acc); background: color-mix(in srgb, var(--acc) 14%, transparent); }
+
+/* "Plus" sheet */
+.sheet { position: fixed; inset: 0; z-index: 30; }
+.sheet-scrim { position: absolute; inset: 0; background: rgb(20 10 20 / .35); }
+.sheet-panel {
+  position: absolute; left: var(--gutter); right: var(--gutter);
+  bottom: calc(80px + env(safe-area-inset-bottom));
+  padding: 8px; display: grid; gap: 2px;
+  animation: sheet-in .22s ease-out;
+}
+.sheet-item { display: flex; align-items: center; min-height: 52px; padding: 0 16px; border-radius: 16px; text-decoration: none; font-weight: 600; }
+.sheet-item[aria-current=page] { color: var(--acc); background: color-mix(in srgb, var(--acc) 14%, transparent); }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+/* side menu (>= 900px) */
+@media (min-width: 900px) {
+  body { padding-bottom: 0; padding-left: calc(248px + env(safe-area-inset-left)); }
+  #main { padding: 36px 40px 48px; }
+  #nav {
+    top: 0; right: auto; bottom: auto; width: 248px; height: 100vh; height: 100dvh;
+    padding: calc(24px + env(safe-area-inset-top)) 14px 24px calc(14px + env(safe-area-inset-left));
+    border-top: 0; border-right: 1px solid var(--line);
+  }
+  #nav .brand { display: flex; align-items: center; gap: 10px; padding: 0 12px 24px; font: 700 1.6rem/1 var(--font-display); }
+  .brand-mark { width: 14px; height: 14px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 0 5px color-mix(in srgb, var(--acc) 25%, transparent); }
+  .nav-list { flex-direction: column; gap: 4px; justify-content: flex-start; }
+  .nav-list li { flex: none; }
+  .nav-extra { display: block; }
+  .nav-more { display: none; }
+  .nav-item { flex-direction: row; justify-content: flex-start; gap: 12px; min-height: 48px; padding: 0 14px; font-size: 15px; }
+  .sheet { display: none !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Cap</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+
+<nav id="nav" aria-label="Navigation principale">
+  <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Cap</span></div>
+  <ul class="nav-list">
+    <li><a class="nav-item" href="#accueil" data-route="accueil">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5M5.5 10v9.5h13V10"/></svg><span>Accueil</span></a></li>
+    <li><a class="nav-item" href="#offres" data-route="offres">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6"/></svg><span>Offres</span></a></li>
+    <li><a class="nav-item" href="#candidatures" data-route="candidatures">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="7" width="17" height="12.5" rx="2.5"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M3.5 13h17"/></svg><span>Candidatures</span></a></li>
+    <li class="nav-extra"><a class="nav-item" href="#planning" data-route="planning">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Planning</span></a></li>
+    <li><a class="nav-item" href="#messages" data-route="messages">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 3.5V16A2.5 2.5 0 0 1 4 13.5z"/></svg><span>Messages</span></a></li>
+    <li class="nav-extra"><a class="nav-item" href="#analytique" data-route="analytique">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 19.5V10M10.5 19.5V5M16.5 19.5v-7M21 19.5H3"/></svg><span>Analytique</span></a></li>
+    <li class="nav-extra"><a class="nav-item" href="#reglages" data-route="reglages">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span>Réglages</span></a></li>
+    <li class="nav-more"><button type="button" class="nav-item" id="more-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="more-sheet">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></svg><span>Plus</span></button></li>
+  </ul>
+</nav>
+
+<div id="more-sheet" class="sheet" role="dialog" aria-label="Plus de pages" hidden>
+  <div class="sheet-scrim" data-close-sheet></div>
+  <div class="sheet-panel glass">
+    <a class="sheet-item" href="#planning" data-route="planning">Planning</a>
+    <a class="sheet-item" href="#analytique" data-route="analytique">Analytique</a>
+    <a class="sheet-item" href="#reglages" data-route="reglages">Réglages</a>
+  </div>
+</div>
+
+<main id="main">
+  <section id="screen-accueil" data-screen="accueil" aria-labelledby="h-accueil" hidden><h1 id="h-accueil">Accueil</h1><div class="screen-body"></div></section>
+  <section id="screen-offres" data-screen="offres" aria-labelledby="h-offres" hidden><h1 id="h-offres">Offres</h1><div class="screen-body"></div></section>
+  <section id="screen-candidatures" data-screen="candidatures" aria-labelledby="h-candidatures" hidden><h1 id="h-candidatures">Candidatures</h1><div class="screen-body"></div></section>
+  <section id="screen-planning" data-screen="planning" aria-labelledby="h-planning" hidden><h1 id="h-planning">Planning</h1><div class="screen-body"></div></section>
+  <section id="screen-messages" data-screen="messages" aria-labelledby="h-messages" hidden><h1 id="h-messages">Messages</h1><div class="screen-body"></div></section>
+  <section id="screen-analytique" data-screen="analytique" aria-labelledby="h-analytique" hidden><h1 id="h-analytique">Analytique</h1><div class="screen-body"></div></section>
+  <section id="screen-reglages" data-screen="reglages" aria-labelledby="h-reglages" hidden><h1 id="h-reglages">Réglages</h1><div class="screen-body"></div></section>
+</main>
+
+<!-- Later tasks add their scripts here, in order: data.js, match.js, ui/charts/screens, outlook, palette, then app.js last. -->
+<script src="js/match.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -15,6 +15,7 @@ import { summarizeReport } from './report-summary.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TZ = 'Europe/Paris';
 const TIMELINE_DAYS = 180;
+const CANONICAL = new Set(['Evaluated', 'Speculative', 'Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP']);
 const APPLIED_OR_BEYOND = new Set(['Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired']);
 
 export function loadMatch() {
@@ -120,8 +121,8 @@ export function buildSnapshot(input) {
   const { due, byNum: fu } = followupsDue(input.trackerContent, input.followupsContent, input.statusLogContent, today);
   const { normalizeCompany, domainsFromUrl } = match();
 
-  const apps = rows.map((row) => {
-    const status = statusByNum.get(row.num) ?? 'Unknown';
+  const apps = rows.filter((row) => CANONICAL.has(statusByNum.get(row.num))).map((row) => {
+    const status = statusByNum.get(row.num);
     const reportNum = extractTrackerReportNumbers(row.report, '')[0] ?? null;
     const rep = reportNum != null ? reportByNum.get(reportNum) : null;
     const url = httpsOrNull(row.url) || (rep ? rep.url : null);

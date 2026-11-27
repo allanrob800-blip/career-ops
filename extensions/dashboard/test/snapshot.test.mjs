@@ -52,3 +52,17 @@ test('buildSnapshot on empty inputs', () => {
 test('loadMatch returns CapMatch', () => {
   assert.equal(loadMatch().normalizeCompany('Cobalt SAS'), 'cobalt');
 });
+
+test('applied_on falls back to the row date when no status-log entry exists', () => {
+  const s = buildSnapshot(loadFixtureInput(NOW));
+  assert.equal(s.apps.find((a) => a.num === 4).applied_on, '2026-11-25');
+});
+
+test('rows with a non-canonical status are dropped', () => {
+  const input = loadFixtureInput(NOW);
+  input.trackerContent += '| 9 | 2026-11-26 | Weird Co | Role | 3.0/5 | Bogusstate | ❌ | — | x |\n';
+  const s = buildSnapshot(input);
+  assert.equal(s.apps.find((a) => a.num === 9), undefined);
+  assert.equal(s.apps.length, 8);
+  assert.ok(s.apps.every((a) => STATES.includes(a.status)));
+});

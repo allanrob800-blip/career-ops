@@ -382,3 +382,33 @@ test('assemble: a proposals part lands in snapshot.proposals (default []); an un
     assert.deepEqual((await last(q)).snapshot.proposals, []);
   } finally { await q.close(); }
 });
+
+// final wave F6: two requests in the same millisecond never tie on created_at, so the latest one wins
+test('created_at is strictly increasing within the page, even in the same millisecond; expectedStatus follows it', async () => {
+  const p = await open(withApps(APPS));
+  try {
+    await settle(p);
+    const out = await p.page.evaluate(async () => {
+      const RealDate = Date;
+      const FIXED = RealDate.parse('2026-11-27T10:00:00.000Z');
+      class Frozen extends RealDate {
+        constructor(...a) { if (a.length) super(...a); else super(FIXED); }
+        static now() { return FIXED; }
+      }
+      globalThis.Date = Frozen;
+      try {
+        await Promise.all([CapData.requestStatus(3, 'Interview'), CapData.requestStatus(3, 'Offer')]);
+        await CapData.requestNote(3, 'même milliseconde');
+      } finally { globalThis.Date = RealDate; }
+      const reqs = (await (await claude.use('db')).collection('requests').get()).docs.map((d) => d.data());
+      return { reqs, expected: CapData.expectedStatus(3) };
+    });
+    const st = out.reqs.filter((r) => r.type === 'status').sort((a, b) => a.created_at.localeCompare(b.created_at));
+    assert.deepEqual(st.map((r) => `${r.from_status}>${r.to_status}`), ['Applied>Interview', 'Interview>Offer']);
+    assert.ok(st[1].created_at > st[0].created_at, `${st[0].created_at} < ${st[1].created_at}`);
+    const note = out.reqs.find((r) => r.type === 'note');
+    assert.ok(note.created_at > st[1].created_at, 'every request kind shares the page clock');
+    assert.equal(new Set(out.reqs.map((r) => r.created_at)).size, 3);
+    assert.equal(out.expected, 'Offer');
+  } finally { await p.close(); }
+});

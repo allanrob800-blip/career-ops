@@ -199,6 +199,16 @@
   // Requests written by this page that the listener may not have delivered yet (id -> body).
   const ownReqs = new Map();
 
+  // created_at of a request written by this page: strictly later than the previous one, even in the same
+  // millisecond (expectedStatus reads the latest pending status request by created_at; a tie would fall to the
+  // random request ids).
+  let lastStamp = 0;
+  function stamp() {
+    const now = Date.now();
+    lastStamp = now > lastStamp ? now : lastStamp + 1;
+    return new Date(lastStamp).toISOString();
+  }
+
   async function writeRequest(d, body) {
     const id = crypto.randomUUID();
     ownReqs.set(id, body);
@@ -239,7 +249,7 @@
     return getDb().then((d) => serial('requests:status', async () => {
       const from_status = expectedStatus(ref);
       if (!from_status) throw new Error('Candidature introuvable dans les données synchronisées');
-      await writeRequest(d, { type: 'status', ref, from_status, to_status, created_at: new Date().toISOString(), state: 'pending' });
+      await writeRequest(d, { type: 'status', ref, from_status, to_status, created_at: stamp(), state: 'pending' });
     }));
   }
 
@@ -260,7 +270,7 @@
       checkRef(ref);
       note = oneLine(raw, 'Note'); // a Return in the field is a space in the tracker's one-line cell
     } catch (e) { return Promise.reject(e); }
-    return getDb().then((d) => writeRequest(d, { type: 'note', ref, note, created_at: new Date().toISOString(), state: 'pending' }));
+    return getDb().then((d) => writeRequest(d, { type: 'note', ref, note, created_at: stamp(), state: 'pending' }));
   }
 
   // why (« Pourquoi cette entreprise ? ») and retouche texts go to the dossier store, which refuses a line break.
@@ -270,7 +280,7 @@
       checkRef(ref);
       text = oneLine(raw, 'Réponse');
     } catch (e) { return Promise.reject(e); }
-    return getDb().then((d) => writeRequest(d, { type, ref, text, created_at: new Date().toISOString(), state: 'pending' }));
+    return getDb().then((d) => writeRequest(d, { type, ref, text, created_at: stamp(), state: 'pending' }));
   }
   const requestWhy = (ref, raw) => requestText('why', ref, raw);
   const requestRetouche = (ref, raw) => requestText('retouche', ref, raw);

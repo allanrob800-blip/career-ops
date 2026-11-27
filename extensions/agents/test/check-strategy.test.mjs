@@ -126,6 +126,18 @@ test('validateSheet keeps a valid sheet whole', () => {
   assert.deepEqual(out, sheet({ verification: { ok: true, reasons: [] } }));
 });
 
+test('validateSheet accepts a sheet written before the letter: lettre_angle absent, null or blank is null', () => {
+  const { lettre_angle: _omit, ...noLetter } = sheet();
+  for (const input of [noLetter, sheet({ lettre_angle: null }), sheet({ lettre_angle: '' }), sheet({ lettre_angle: '   ' })]) {
+    const { sheet: out, errors } = validateSheet(input);
+    assert.deepEqual(errors, [], JSON.stringify(input.lettre_angle));
+    assert.equal(out.lettre_angle, null);
+  }
+  const long = validateSheet(sheet({ lettre_angle: 'x'.repeat(700) })).sheet.lettre_angle;
+  assert.equal([...long].length, 600, 'bounded when present');
+  assert.match(validateSheet(sheet({ lettre_angle: 3 })).errors[0], /lettre_angle/);
+});
+
 test('validateSheet refuses a proof source outside cv.md, article-digest.md, config/profile.yml, modes/_profile.md', () => {
   const ok = ['cv.md', 'cv.md › expérience la plus récente', 'article-digest.md#projet', 'config/profile.yml',
     'modes/_profile.md › Archétypes'];

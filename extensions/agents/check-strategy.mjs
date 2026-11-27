@@ -160,17 +160,23 @@ const proofItem = (v, at) => {
 /**
  * A bounded copy of a strategy sheet (strings of 600 characters at most, lists of 12 items at most, unknown fields
  * dropped) and the problems found. Required: titre_cv, angle (texts), preuves, mots_cles_repris (lists). Optional:
- * lettre_angle, mots_cles_ecartes, ecarts, verification. An invalid item, such as a proof whose source is not
+ * lettre_angle (absent, null or blank: null in the copy), mots_cles_ecartes, ecarts, verification. An invalid item, such as a proof whose source is not
  * cv.md, article-digest.md, config/profile.yml or modes/_profile.md, is reported and left out of the copy.
  */
 export function validateSheet(sheet) {
   const errors = [];
   if (!isObj(sheet)) return { sheet: {}, errors: ['la fiche stratégie doit être un objet JSON'] };
   const out = {};
-  for (const [field, required] of [['titre_cv', true], ['angle', true], ['lettre_angle', false]]) {
+  for (const field of ['titre_cv', 'angle']) {
     if (isText(sheet[field])) out[field] = bound(sheet[field]);
-    else if (required || sheet[field] !== undefined) errors.push(mustBeText(field));
+    else errors.push(mustBeText(field));
   }
+  // The sheet is written before the letter, which waits for the candidate's « Pourquoi cette entreprise ? »:
+  // lettre_angle absent, null or blank is null.
+  const la = sheet.lettre_angle;
+  if (isText(la)) out.lettre_angle = bound(la);
+  else if (la === undefined || la === null || typeof la === 'string') out.lettre_angle = null;
+  else errors.push('lettre_angle doit être un texte ou null');
   const lists = [
     ['preuves', true, proofItem],
     ['mots_cles_repris', true, textItem],

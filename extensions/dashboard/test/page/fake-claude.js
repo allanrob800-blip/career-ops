@@ -16,6 +16,7 @@
  *        set replaces (creates); update merges recursively (arrays replace) and REJECTS {code:'invalid_argument'} if the doc is missing.
  *   CollectionReference {id, path, doc(id?) (mints an id), add(data), where, orderBy, limit, get(), onSnapshot(next, error?)}
  *        QuerySnapshot {docs, size, empty, docChanges(), metadata}; docs ordered by id unless orderBy.
+ *   window.__fake.db.latencyMs (optional) delays the FIRST delivery of every listener (setTimeout).
  *   onSnapshot fires asynchronously (microtask, independent of timers) on subscribe, then only when a document
  *        under the listener's own path changes (a doc listener: that doc; a collection listener: its direct children).
  *   mcp.watchTool(server, tool, input, handler, opts) -> unsubscribe fn. Async calls
@@ -84,7 +85,8 @@
     let live = true;
     const l = { kind, path, fire: () => { if (!live) return; try { next(read()); } catch (e) { if (typeof error === 'function') error({ code: 'unavailable', message: String(e) }); } } };
     listeners.add(l);
-    Promise.resolve().then(l.fire);
+    const latency = (fake.db && fake.db.latencyMs) || 0; // optional delay of the first delivery
+    if (latency > 0) setTimeout(l.fire, latency); else Promise.resolve().then(l.fire);
     return () => { live = false; listeners.delete(l); };
   }
 

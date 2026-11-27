@@ -223,7 +223,13 @@
       }
     } catch (e) { return Promise.reject(e); }
     return getDb().then((d) => serial('settings/prefs', async () => {
-      const merged = { ...(prefsCur || DEFAULT_PREFS), ...partial };
+      let base = prefsCur;
+      if (!base) { // no listener delivery yet: read the stored doc rather than assume defaults
+        const snap = await d.doc('settings/prefs').get();
+        base = normPrefs(snap.exists ? snap.data() : null);
+        prefsBody = snap.exists ? snap.data() : null;
+      }
+      const merged = { ...base, ...partial };
       if (prefsBody && JSON.stringify(prefsBody) === JSON.stringify(merged)) return; // no real change
       await writeWithRetry(() => d.doc('settings/prefs').set(merged));
       prefsCur = merged;

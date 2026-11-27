@@ -238,3 +238,16 @@ test('fake db mirrors the real API: update on missing doc rejects, path grammar 
     assert.deepEqual(r, { upd: 'invalid_argument', odd: 'TypeError', even: 'TypeError', chars: 'TypeError', dots: 'TypeError', extra: 1, add: ['function', true, 1, false], q: [2, false, 'function'] });
   } finally { await p.close(); }
 });
+
+test('savePrefs before the first prefs delivery merges onto the stored doc', async () => {
+  const stored = { weekly_goal: 7, accent: 'ocean', reduced_motion: true };
+  const p = await openPage(browser, { url: server.url, fake: { db: { docs: { 'settings/prefs': stored }, latencyMs: 200 } } });
+  try {
+    await p.page.evaluate(() => { window.__states = []; CapData.start((s) => window.__states.push(JSON.parse(JSON.stringify(s)))); });
+    await p.page.evaluate(() => CapData.savePrefs({ reduced_motion: false }));
+    const body = await p.page.evaluate(async () => (await (await claude.use('db')).doc('settings/prefs').get()).data());
+    assert.deepEqual(body, { weekly_goal: 7, accent: 'ocean', reduced_motion: false });
+    await p.page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
+    assert.deepEqual((await last(p)).prefs, body);
+  } finally { await p.close(); }
+});

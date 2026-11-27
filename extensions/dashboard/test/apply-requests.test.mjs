@@ -363,3 +363,37 @@ test('contract: the why / retouche bodies CapData.requestWhy / requestRetouche w
   assert.equal(d.retouches.at(-1).text, 'Ajouter un chiffre clé.');
   assert.equal(d.state, 'a_refaire');
 });
+
+// final wave F7: a dossier store that cannot be written turns this run's why / retouche results into rejections
+test('a throwing dossier writer rejects the why / retouche results; status results stay applied', async () => {
+  const { applyRequests } = await import('../apply-requests.mjs');
+  const saved = { root: process.env.CAREER_OPS_ROOT, data: process.env.CAREER_OPS_DATA_DIR, tracker: process.env.CAREER_OPS_TRACKER };
+  process.env.CAREER_OPS_ROOT = root();
+  delete process.env.CAREER_OPS_DATA_DIR;
+  delete process.env.CAREER_OPS_TRACKER;
+  const before = readFileSync(join(root(), 'data/dossiers.json'), 'utf8');
+  let calls = 0;
+  const writeStore = () => { calls++; throw new Error('disk full'); };
+  try {
+    const out = await applyRequests([
+      why('f-w', 1, 'Raison.', { created_at: '2026-11-26T18:00:00Z' }),
+      st('f-s', 3, 'Applied', 'Interview', { created_at: '2026-11-26T18:01:00Z' }),
+      retouche('f-r', 6, 'Mettre la roadmap en avant.', { created_at: '2026-11-26T18:02:00Z' }),
+    ], { writeStore });
+    const byId = Object.fromEntries(out.map((a) => [a.result.id, a.result]));
+    assert.equal(calls, 1, 'the store is written once, at the end');
+    assert.equal(byId['f-s'].state, 'applied', byId['f-s'].reason);
+    assert.ok(byId['f-s'].applied_at);
+    for (const id of ['f-w', 'f-r']) {
+      assert.equal(byId[id].state, 'rejected');
+      assert.equal(byId[id].applied_at, null);
+      assert.match(byId[id].reason, /cannot write data\/dossiers\.json: disk full/);
+    }
+    assert.match(row3(), /\|\s*Interview\s*\|/);
+    assert.equal(readFileSync(join(root(), 'data/dossiers.json'), 'utf8'), before);
+  } finally {
+    for (const [k, v] of [['CAREER_OPS_ROOT', saved.root], ['CAREER_OPS_DATA_DIR', saved.data], ['CAREER_OPS_TRACKER', saved.tracker]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+});

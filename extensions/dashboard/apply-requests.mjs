@@ -85,8 +85,8 @@ function lastJson(stdout) {
   try { return i >= 0 ? JSON.parse(s.slice(i + 1)) : null; } catch { return null; }
 }
 
-// The dossier store of one run, read on the first why / retouche request.
-function dossierSession() {
+// The dossier store of one run, read on the first why / retouche request and written with writeStore(root, store).
+function dossierSession(writeStore = writeDossiers) {
   let root = null;
   let store = null;
   let readError = null;
@@ -112,7 +112,7 @@ function dossierSession() {
     save() {
       if (!changed) return null;
       try {
-        writeDossiers(root, store);
+        writeStore(root, store);
         return null;
       } catch (e) {
         return short(`cannot write data/dossiers.json: ${e.message}`);
@@ -169,12 +169,15 @@ function byCreated(a, b) {
   return i < j ? -1 : i > j ? 1 : 0;
 }
 
-/** Pending entries only, oldest first. Returns the results in the order they were applied. */
-export async function applyRequests(entries, { dryRun = false } = {}) {
+/**
+ * Pending entries only, oldest first. Returns the results in the order they were applied.
+ * writeStore(root, store) writes the dossier store at the end of the run (default writeDossiers; injectable for tests).
+ */
+export async function applyRequests(entries, { dryRun = false, writeStore = writeDossiers } = {}) {
   const pending = (Array.isArray(entries) ? entries : [])
     .filter((e) => isObj(e) && isObj(e.data) && e.data.state === 'pending')
     .sort(byCreated);
-  const dossiers = dossierSession();
+  const dossiers = dossierSession(writeStore);
   const out = [];
   for (const entry of pending) out.push({ result: await applyOne(entry, dryRun, dossiers), version: entry.version });
   const writeError = dryRun ? null : dossiers.save();

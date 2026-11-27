@@ -17,6 +17,22 @@ export const MIN_SCORE = 4.0;
 export const DEFAULT_MAX = 3;
 const TIERS = ['High Confidence', 'Proceed with Caution', 'Suspicious'];
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isSuspicious = (tier) => typeof tier === 'string' && /suspicious/i.test(tier);
+const httpsOrNull = (u) => (typeof u === 'string' && u.startsWith('https://') ? u : null);
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const parisDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' });
+/** The Europe/Paris calendar day (YYYY-MM-DD) of a Date. */
+export const parisDay = (d) => parisDayFmt.format(d);
+
+// Dossiers whose prepared_at falls on the Paris day `today`: they already used part of today's cap.
+function preparedOn(dossiers, today) {
+  let n = 0;
+  for (const d of Object.values(dossiers)) {
+    const t = isObj(d) && typeof d.prepared_at === 'string' ? Date.parse(d.prepared_at) : NaN;
+    if (!Number.isNaN(t) && parisDay(new Date(t)) === today) n++;
+  }
+  return n;
+}
 
 // Why an Evaluated row is not prepared today, or null when it may be. Checks run in this order; the first that
 // fails is reported.
@@ -28,20 +44,25 @@ function exclusion(row, legitimacyByReport, dossiers) {
   if (state === 'pret') return 'dossier ready (pret)';
   if (state === 'a_verifier') return 'dossier awaiting review (a_verifier)';
   if (!Number.isInteger(row.report_num)) return 'no evaluation report';
-  if (legitimacyByReport.get(row.report_num) === 'Suspicious') return 'legitimacy Suspicious';
+  if (isSuspicious(legitimacyByReport.get(row.report_num))) return 'legitimacy Suspicious';
   return null;
 }
 
 /**
  * The offers to prepare: Evaluated rows scored ≥ 4.0, not Suspicious, with no dossier in `pret` or `a_verifier`
  * (an `a_refaire` dossier is prepared again), by score descending then number ascending, at most `max`.
+ * `max` is a daily cap: with `today` (YYYY-MM-DD, Europe/Paris), dossiers already prepared that Paris day count
+ * against it (never below 0).
  * rows: [{num, status, score: number|null, company, role, url, report_num: number|null}].
  * legitimacyByReport: Map(report_num → tier). Every Evaluated row left out is in `skipped` with its reason, by
  * number; rows of any other status are not listed at all (the daily routine reads this output).
  */
-export function selectForPrep({ rows, legitimacyByReport, store, max = DEFAULT_MAX }) {
+export function selectForPrep({ rows, legitimacyByReport, store, max = DEFAULT_MAX, today }) {
   if (!Number.isInteger(max) || max < 0) throw new TypeError('max must be a non-negative integer');
+  if (today !== undefined && !(typeof today === 'string' && DAY.test(today))) throw new TypeError('today must be YYYY-MM-DD');
   const dossiers = isObj(store) && isObj(store.dossiers) ? store.dossiers : {};
+  const doneToday = today === undefined ? 0 : preparedOn(dossiers, today);
+  const cap = Math.max(0, max - doneToday);
   const legit = legitimacyByReport instanceof Map ? legitimacyByReport : new Map();
   const kept = [];
   const skipped = [];
@@ -52,9 +73,10 @@ export function selectForPrep({ rows, legitimacyByReport, store, max = DEFAULT_M
     else kept.push(row);
   }
   kept.sort((a, b) => b.score - a.score || a.num - b.num);
-  for (const row of kept.slice(max)) skipped.push({ num: row.num, reason: `daily limit reached (max ${max})` });
+  const limitReason = `daily limit reached (max ${max}, ${doneToday} already prepared today)`;
+  for (const row of kept.slice(cap)) skipped.push({ num: row.num, reason: limitReason });
   skipped.sort((a, b) => a.num - b.num);
-  const candidates = kept.slice(0, max).map(({ num, report_num, company, role, score, url }) => ({
+  const candidates = kept.slice(0, cap).map(({ num, report_num, company, role, score, url }) => ({
     num, report_num, company, role, score, url: url ?? null,
   }));
   return { candidates, skipped };
@@ -70,15 +92,18 @@ export function selectLetters(store) {
     .sort((a, b) => a - b);
 }
 
-// The canonical tier a `**Legitimacy:**` value starts with ("Suspicious — 3 signals" → "Suspicious"), else the value.
+// The canonical tier of a `**Legitimacy:**` value. Any mention of "suspicious" (`**Suspicious**`, `⚠️ Suspicious`)
+// is Suspicious; otherwise the tier the value starts with, else the value itself.
 function legitimacyTier(value) {
   if (typeof value !== 'string') return null;
+  if (isSuspicious(value)) return 'Suspicious';
   return TIERS.find((t) => value.toLowerCase().startsWith(t.toLowerCase())) ?? value;
 }
 
 const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '');
 
-// Tracker rows in the selectForPrep shape, plus the legitimacy of each report they link to.
+// Tracker rows in the selectForPrep shape, plus the legitimacy of each report they link to. A row that links a
+// report number with no reports/NNN-*.md file gets report_num null, so it is skipped as having no report.
 function loadInput(root) {
   const trackerContent = read(resolveTrackerPath(root));
   const lines = trackerContent.replace(/\r/g, '').split('\n');
@@ -102,7 +127,7 @@ function loadInput(root) {
     const reportNum = extractTrackerReportNumbers(row.report, row.notes)[0] ?? null;
     const rep = reportNum != null ? summaryOf(reportNum) : null;
     if (rep) legitimacyByReport.set(reportNum, legitimacyTier(rep.legitimacy));
-    const url = typeof row.url === 'string' && row.url.startsWith('https://') ? row.url : (rep ? rep.url : null);
+    const url = httpsOrNull(row.url) ?? (rep ? httpsOrNull(rep.url) : null);
     return {
       num: row.num,
       status: statusByNum.get(row.num) ?? null,
@@ -110,7 +135,7 @@ function loadInput(root) {
       company: row.company,
       role: row.role,
       url,
-      report_num: reportNum,
+      report_num: rep ? reportNum : null,
     };
   });
   return { rows, legitimacyByReport };
@@ -143,6 +168,6 @@ if (isMainModule(import.meta.url)) {
   }
   const out = opts.letters
     ? { letters: selectLetters(store) }
-    : selectForPrep({ ...loadInput(root), store, max: opts.max });
+    : selectForPrep({ ...loadInput(root), store, max: opts.max, today: parisDay(new Date()) });
   process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
 }

@@ -80,6 +80,48 @@ test('selectForPrep sorts by score descending then number ascending, and cuts at
   assert.equal(none.skipped.length, 5);
 });
 
+test('selectForPrep treats a decorated Suspicious tier as Suspicious', () => {
+  const rows = [row(1), row(2), row(3), row(4)];
+  const legitimacyByReport = new Map([[1, '**Suspicious**'], [2, '⚠️ Suspicious'], [3, 'suspicious (2 signals)']]);
+  const r = selectForPrep({ rows, legitimacyByReport, store: store(), max: 10 });
+  assert.deepEqual(r.candidates.map(pick), [4]);
+  assert.ok(r.skipped.every((x) => x.reason === 'legitimacy Suspicious'));
+});
+
+test('selectForPrep: dossiers prepared on the Paris day `today` count against max', () => {
+  const rows = [row(1), row(2), row(3), row(4)];
+  const prepared = (at) => ({ state: 'pret', prepared_at: at });
+  const today = '2026-11-27';
+  const s = store({
+    10: prepared('2026-11-27T06:40:00Z'),
+    11: prepared('2026-11-26T23:30:00Z'), // 00:30 on the 27th in Paris: today
+    12: prepared('2026-11-26T22:30:00Z'), // 23:30 on the 26th in Paris: yesterday
+    13: prepared('2026-11-26T07:50:00Z'), // yesterday
+  });
+  const r = selectForPrep({ rows, legitimacyByReport: new Map(), store: s, max: 3, today });
+  assert.deepEqual(r.candidates.map(pick), [1]);
+  assert.deepEqual(r.skipped.map((x) => x.num), [2, 3, 4]);
+  assert.ok(r.skipped.every((x) => /limit/.test(x.reason)));
+
+  const yesterday = store({ 12: prepared('2026-11-26T22:30:00Z'), 13: prepared('2026-11-26T07:50:00Z') });
+  assert.equal(selectForPrep({ rows, legitimacyByReport: new Map(), store: yesterday, max: 3, today }).candidates.length, 3);
+
+  const many = store({ 10: prepared('2026-11-27T06:40:00Z'), 11: prepared('2026-11-27T07:00:00Z'), 14: prepared('2026-11-27T08:00:00Z'), 15: prepared('2026-11-27T09:00:00Z') });
+  const none = selectForPrep({ rows, legitimacyByReport: new Map(), store: many, max: 3, today });
+  assert.deepEqual(none.candidates, [], 'the cap never goes below 0');
+  assert.equal(none.skipped.length, 4);
+
+  assert.equal(selectForPrep({ rows, legitimacyByReport: new Map(), store: s, max: 3 }).candidates.length, 3, 'no today: nothing counted');
+});
+
+test('selectForPrep refuses an invalid max or today', () => {
+  const args = { rows: [row(1)], legitimacyByReport: new Map(), store: store() };
+  assert.throws(() => selectForPrep({ ...args, max: -1 }), TypeError);
+  assert.throws(() => selectForPrep({ ...args, max: 1.5 }), TypeError);
+  assert.throws(() => selectForPrep({ ...args, max: '3' }), TypeError);
+  assert.throws(() => selectForPrep({ ...args, today: '27/11/2026' }), TypeError);
+});
+
 test('selectForPrep: max defaults to 3', () => {
   const rows = [row(1), row(2), row(3), row(4)];
   assert.equal(selectForPrep({ rows, legitimacyByReport: new Map(), store: store() }).candidates.length, 3);
@@ -154,14 +196,49 @@ test('CLI with an empty data root prints an empty selection', () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('CLI reads the tier a decorated Legitimacy line starts with', () => {
+// Runs fn(root) on a temp copy of the fixture root.
+function withRoot(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'agents-select-'));
   try {
     const root = join(dir, 'root');
     cpSync(FIXTURE_ROOT, root, { recursive: true });
-    const rep = join(root, 'reports', '002-brume-studio.md');
-    writeFileSync(rep, readFileSync(rep, 'utf8').replace('**Legitimacy:** Suspicious', '**Legitimacy:** suspicious — two signals (Block G)'));
-    const out = JSON.parse(run([], root));
-    assert.deepEqual(out.skipped.find((s) => s.num === 2), { num: 2, reason: 'legitimacy Suspicious' });
+    return fn(root);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+const edit = (file, from, to) => {
+  const before = readFileSync(file, 'utf8');
+  assert.ok(before.includes(from), `fixture text not found: ${from}`);
+  writeFileSync(file, before.replace(from, to));
+};
+
+test('CLI treats any Legitimacy value that mentions suspicious as Suspicious', () => {
+  for (const value of ['suspicious — two signals (Block G)', '**Suspicious**', '⚠️ Suspicious', 'Likely SUSPICIOUS (2 signals)']) {
+    withRoot((root) => {
+      edit(join(root, 'reports', '002-brume-studio.md'), '**Legitimacy:** Suspicious', `**Legitimacy:** ${value}`);
+      const out = JSON.parse(run([], root));
+      assert.deepEqual(out.skipped.find((s) => s.num === 2), { num: 2, reason: 'legitimacy Suspicious' }, value);
+      assert.deepEqual(out.candidates.map(pick), [1]);
+    });
+  }
 });
+
+test('CLI skips a row whose linked report file does not exist', () => withRoot((root) => {
+  edit(join(root, 'data', 'applications.md'), '| 4.1/5 | Evaluated | ❌ | — |', '| 4.1/5 | Evaluated | ❌ | [7](reports/007-fjord-mobilite.md) |');
+  const out = JSON.parse(run([], root));
+  assert.deepEqual(out.skipped.find((s) => s.num === 6), { num: 6, reason: 'no evaluation report' });
+  assert.deepEqual(out.candidates.map(pick), [1]);
+}));
+
+test('CLI keeps only an https:// URL from the report', () => withRoot((root) => {
+  edit(join(root, 'reports', '001-altair-conseil.md'), '**URL:** https://', '**URL:** http://');
+  assert.equal(JSON.parse(run([], root)).candidates[0].url, null);
+}));
+
+test('CLI with a dossier prepared today (Paris) counts it against --max', () => withRoot((root) => {
+  const file = join(root, 'data', 'dossiers.json');
+  const s = JSON.parse(readFileSync(file, 'utf8'));
+  s.dossiers['3'].prepared_at = new Date().toISOString();
+  writeFileSync(file, JSON.stringify(s));
+  assert.deepEqual(JSON.parse(run(['--max', '1'], root)).candidates, []);
+  assert.deepEqual(JSON.parse(run(['--max', '2'], root)).candidates.map(pick), [1]);
+}));

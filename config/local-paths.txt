@@ -1,0 +1,5 @@
+# Fork-local paths (see config/local-paths.example.txt).
+# The dashboard and agents extensions, and the Claude Code agent files that
+# drive them, are owned by this checkout; upstream does not ship them.
+extensions/
+.claude/agents/

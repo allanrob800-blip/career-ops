@@ -316,3 +316,6 @@ web/out/
 # Regenerate with `npm run harvest:buildlist`.
 buildlist-*.yml
 buildlist-*.yml.progress.json
+
+# Fork route (config/local-paths.example.txt): track the declaration file.
+!config/local-paths.txt

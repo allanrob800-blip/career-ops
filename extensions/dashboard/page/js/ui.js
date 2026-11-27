@@ -235,6 +235,25 @@
     } finally { dlBusy = false; }
   }
 
+  // ---- copy to the clipboard ----
+  const COPY_FAILED = 'Copie impossible : sélectionnez le texte.';
+  // Writes `text` to the clipboard and returns true. When the browser refuses (or has no clipboard), selects the text
+  // of `node` so it can be copied by hand, and returns false: the caller then shows COPY_FAILED.
+  async function copyText(text, node) {
+    try {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') throw new Error('no clipboard');
+      await navigator.clipboard.writeText(String(text ?? ''));
+      return true;
+    } catch {
+      if (node) {
+        const sel = getSelection(), range = document.createRange();
+        range.selectNodeContents(node);
+        sel.removeAllRanges(); sel.addRange(range);
+      }
+      return false;
+    }
+  }
+
   // ---- loading / empty / unavailable gate ----
   const UNAVAILABLE = ['Données indisponibles pour l\'instant', 'La base de la page ne répond pas. Réessayez dans un moment : vos données ne sont pas perdues.'];
   const INCOMPLETE = 'Synchronisation incomplète — les données seront rétablies à la prochaine session';
@@ -318,6 +337,6 @@
     esc, safeHref, blobHref, hostOf, fold, countUp, toast, dialog, closeDialog, trapTab, gate, rebuild, reduced, emptyBlock, outlookNote, incompleteNote, INCOMPLETE,
     STATUSES, statusLabel, tone, isSent, figures, SENT, REPLIED, INTERVIEWED, OFFERED, CLOSED,
     today, parisHour, isoDay, addDays, daysBetween, week, fmtDay, fmtLong, fmtWeekday, fmtStamp, fmtNum, fmtPct, plural,
-    ICON, cleanBullet, intent, downloads, canDownload, downloadAsset, pdfName,
+    ICON, cleanBullet, intent, downloads, canDownload, downloadAsset, pdfName, copyText, COPY_FAILED,
   };
 })();

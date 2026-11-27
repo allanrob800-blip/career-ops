@@ -239,7 +239,7 @@ svg text { paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-lin
 
 /* ---------- Accueil ---------- */
 .home { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "hero" "kpis" "todo" "week" "quick" "sync"; }
-.hero { grid-area: hero; } .week { grid-area: week; } .kpis { grid-area: kpis; } .todo { grid-area: todo; } .quick { grid-area: quick; } .sync { grid-area: sync; }
+.hero { grid-area: hero; } .week { grid-area: week; } .kpis { grid-area: kpis; } .home-acts { grid-area: todo; } .quick { grid-area: quick; } .sync { grid-area: sync; }
 @media (min-width: 720px) { .home { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "hero hero" "kpis kpis" "todo week" "quick quick" "sync sync"; } }
 @media (min-width: 1100px) { .home { grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr); grid-template-areas: "hero week" "kpis kpis" "todo quick" "sync sync"; } }
 
@@ -330,6 +330,27 @@ svg text { paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-lin
 .todo-quiet a { display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: 3px; }
 .todo-item[data-outlook-note] a { overflow-wrap: anywhere; }
 .todo-calm { padding: 10px 4px; }
+.home-acts { display: grid; gap: 16px; align-content: start; min-width: 0; }
+/* a follow-up with a text to copy: the text and « Copier » go under the row */
+.todo-follow { flex-wrap: wrap; }
+.followup-box { flex: 1 1 100%; display: grid; gap: 8px; min-width: 0; }
+.followup-box .btn { white-space: normal; }
+/* « À envoyer » */
+.send-note { font-size: .85rem; font-weight: 700; color: var(--warn); }
+/* « À confirmer » */
+.card-note { margin-top: 6px; font-size: .9rem; color: var(--muted); }
+.prop-list { display: grid; margin-top: 8px; }
+.prop { display: grid; gap: 8px; padding: 12px 4px; border-bottom: 1px solid var(--line); min-width: 0; }
+.prop:last-child { border-bottom: 0; }
+.prop-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; overflow-wrap: anywhere; }
+.prop-move { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.prop-arrow { color: var(--muted); }
+.prop-proof { display: grid; gap: 2px; padding: 10px 12px; border-left: 3px solid var(--line); border-radius: 4px 12px 12px 4px; background: var(--track); overflow-wrap: anywhere; min-width: 0; }
+.prop-meta { font-size: .85rem; color: var(--muted); }
+.prop-subj { font-weight: 600; }
+.prop-excerpt { font-size: .9rem; }
+.req-row.prop-actions { justify-content: flex-start; }
+.prop-actions .btn { white-space: normal; text-align: center; }
 
 .quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-content: start; }
 @media (min-width: 720px) and (max-width: 1099px) { .quick { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

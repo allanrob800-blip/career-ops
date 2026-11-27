@@ -851,3 +851,186 @@ for (const width of [360, 430]) {
     } finally { await p.close(); }
   });
 }
+
+// ---- Task 6: Accueil « À envoyer » (ready dossiers), « À confirmer » (status proposals), follow-up texts to copy ----
+const P_COBALT = 'p-0a1b2c3d4e5f6071';
+const P_ECHO = 'p-1b2c3d4e5f607182';
+const P_BOREALIS = 'p-2c3d4e5f60718293';
+const P_DELTA = 'p-3d4e5f6071829304';
+const P_HOSTILE = 'p-4e5f607182930415';
+const proposal = (id, ref, company, from_status, to_status, evidence = {}) => ({
+  id, ref, company, from_status, to_status,
+  evidence: { from: 'rh@exemple.test', date: '2026-11-25T09:30:00Z', subject: 'Votre candidature', excerpt: 'Merci pour votre candidature.', ...evidence },
+});
+// Adds a proposals part (the shape export writes) to the fixture snapshot.
+function withProposals(items, docs = structuredClone(DOCS)) {
+  const meta = docs['snapshot/meta'];
+  docs['snapshot/proposals-g1-0'] = { generation: meta.generation, items };
+  meta.parts = [...meta.parts, 'snapshot/proposals-g1-0'];
+  return docs;
+}
+const patchApp = (docs, num, patch) => {
+  for (const [k, v] of Object.entries(docs)) if (k.startsWith('snapshot/apps-')) for (const a of v.items) if (a.num === num) Object.assign(a, patch);
+  return docs;
+};
+const BOREALIS_TEXT = 'Bonjour,\n\nJe me permets de revenir vers vous au sujet de ma candidature au poste de Data Lead.\n\nBien cordialement,\nCamille Test';
+
+test('Accueil « À envoyer »: ready dossiers oldest first, « lettre à compléter », the row opens the application', async () => {
+  const docs = structuredClone(DOCS);
+  // Cobalt (3) prepared before Acme (1), its letter written; Echo Systems (5) is ready but already sent; Foxtrot (6) is « à vérifier »
+  patchApp(docs, 3, { status: 'Evaluated', applied_on: null, dossier: { ...dossierOf(1), prepared_at: '2026-11-18T07:50:00Z', letter_state: 'prete', has_why: true } });
+  patchApp(docs, 5, { dossier: { ...dossierOf(1), prepared_at: '2026-11-10T07:50:00Z' } });
+  const p = await open({ docs });
+  try {
+    await go(p, 'accueil');
+    const sec = p.page.locator('#to-send');
+    assert.equal((await sec.locator('h2').innerText()).trim(), 'À envoyer');
+    const rows = sec.locator('[data-send]');
+    assert.deepEqual(await rows.evaluateAll((l) => l.map((r) => r.dataset.send)), ['3', '1']);
+    assert.match(await rows.nth(0).innerText(), /Cobalt SAS/);
+    assert.doesNotMatch(await rows.nth(0).innerText(), /lettre à compléter/);
+    assert.match(await rows.nth(1).innerText(), /Acme/);
+    assert.match(await rows.nth(1).innerText(), /lettre à compléter/);
+    await rows.nth(1).locator('[data-open]').click();
+    const dlg = p.page.locator('.dlg[role=dialog][aria-modal=true]');
+    await dlg.waitFor();
+    assert.match(await p.page.locator('.dlg-title').innerText(), /Acme/);
+    assert.equal(await dlg.locator('.cv-space').count(), 1);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Accueil « À confirmer »: proposals with evidence; Confirmer asks for the status then marks it handled, Ignorer only marks it', async () => {
+  const docs = withProposals([
+    proposal(P_COBALT, 3, 'Cobalt SAS', 'Applied', 'Interview', { from: 'rh@cobalt.example', date: '2026-11-24T09:00:00Z', subject: 'Invitation à un entretien', excerpt: 'Seriez-vous disponible mardi ?' }),
+    proposal(P_ECHO, 5, 'Echo Systems', 'Responded', 'Rejected', { from: 'talent@echo.example', subject: 'Votre candidature', excerpt: 'Nous ne donnerons pas suite.' }),
+    proposal(P_BOREALIS, 2, 'Borealis', 'Applied', 'Responded'), // already asked (pending request below)
+    proposal(P_DELTA, 4, 'Delta Labs', 'Applied', 'Interview'), // handled before the page opened
+  ]);
+  docs['requests/r-borealis'] = { type: 'status', ref: 2, from_status: 'Applied', to_status: 'Responded', created_at: '2026-11-27T08:00:00Z', state: 'pending' };
+  docs[`handled/${P_DELTA}`] = { message_id: P_DELTA, at: '2026-11-26T10:00:00Z' };
+  const p = await open({ docs });
+  try {
+    await go(p, 'accueil');
+    const sec = p.page.locator('#to-confirm');
+    assert.equal((await sec.locator('h2').innerText()).trim(), 'À confirmer');
+    assert.deepEqual(await sec.locator('[data-proposal]').evaluateAll((l) => l.map((r) => r.dataset.proposal)), [P_COBALT, P_ECHO]);
+    const cobalt = sec.locator(`[data-proposal="${P_COBALT}"]`);
+    const t = (await cobalt.innerText()).replace(/\s+/g, ' ');
+    for (const s of ['Cobalt SAS', 'Envoyée', 'Entretien', 'rh@cobalt.example', '24 nov.', 'Invitation à un entretien', 'Seriez-vous disponible mardi ?']) assert.ok(t.includes(s), s);
+    assert.match(t, /Envoyée\s*→\s*Entretien/);
+
+    const before = (await requests(p)).length;
+    await cobalt.locator('[data-confirm]').click();
+    await p.page.waitForFunction((id) => window.__fake.db.docs[`handled/${id}`]?.message_id === id, P_COBALT);
+    const asked = (await requests(p)).filter((r) => r.ref === 3);
+    assert.equal(asked.length, 1);
+    assert.deepEqual([asked[0].type, asked[0].from_status, asked[0].to_status, asked[0].state], ['status', 'Applied', 'Interview', 'pending']);
+    // the status request is written before the proposal is marked handled
+    const sets = await p.page.evaluate(() => window.__calls.filter((c) => c.fn === 'doc.set').map((c) => c.args[0].split('/')[0]));
+    assert.deepEqual(sets.slice(-2), ['requests', 'handled']);
+    await p.page.waitForFunction((id) => !document.querySelector(`[data-proposal="${id}"]`), P_COBALT);
+
+    await sec.locator(`[data-proposal="${P_ECHO}"] [data-ignore]`).click();
+    await p.page.waitForFunction((id) => window.__fake.db.docs[`handled/${id}`]?.message_id === id, P_ECHO);
+    await p.page.waitForFunction(() => !document.querySelector('#to-confirm'));
+    assert.equal((await requests(p)).length, before + 1, 'Ignorer writes no request');
+    assert.equal((await requests(p)).filter((r) => r.ref === 5).length, 0);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Accueil « À confirmer »: a request that cannot be written leaves the row, says why, and marks nothing', async () => {
+  const docs = withProposals([proposal(P_COBALT, 3, 'Cobalt SAS', 'Applied', 'Interview')]);
+  const p = await open({ docs });
+  try {
+    await go(p, 'accueil');
+    await p.page.evaluate(() => { CapData.requestStatus = () => Promise.reject(new Error('Base de données indisponible')); });
+    const row = p.page.locator(`#to-confirm [data-proposal="${P_COBALT}"]`);
+    await row.locator('[data-confirm]').click();
+    await row.locator('.req-err').waitFor();
+    assert.equal((await row.locator('.req-err').innerText()).trim(), 'Base de données indisponible');
+    assert.equal(await row.locator('[data-confirm]').isEnabled(), true);
+    assert.equal(await p.page.evaluate((id) => `handled/${id}` in window.__fake.db.docs, P_COBALT), false);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Accueil « À confirmer »: hostile proposal values render as text; a malformed proposal is not shown', async () => {
+  const docs = withProposals([
+    proposal(P_HOSTILE, 8, HOSTILE, 'SKIP', 'Applied', { from: HOSTILE, subject: HOSTILE, excerpt: HOSTILE }),
+    { ...proposal('not-an-id', 3, 'Cobalt SAS', 'Applied', 'Interview') },
+    { ...proposal(P_ECHO, 5, 'Echo Systems', 'Responded', 'Hacked') },
+    { ...proposal(P_COBALT, 3, 'Cobalt SAS', 'Applied', 'Interview'), evidence: null },
+  ]);
+  const p = await open({ docs });
+  try {
+    await go(p, 'accueil');
+    assert.deepEqual(await p.page.locator('#to-confirm [data-proposal]').evaluateAll((l) => l.map((r) => r.dataset.proposal)), [P_HOSTILE]);
+    assert.equal(await p.page.locator('img[src=x]').count(), 0);
+    assert.match(await p.page.locator('#to-confirm').innerText(), /<img src=x onerror=alert\(1\)>/);
+    await p.page.waitForTimeout(100);
+    assert.deepEqual(p.dialogs, []);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Accueil: a follow-up with a text shows it with « Copier »; a refused copy asks to select the text', async () => {
+  const p = await open({ init: clipboardStub });
+  try {
+    await go(p, 'accueil');
+    const row = p.page.locator('#todo [data-followup]', { hasText: 'Borealis' });
+    assert.equal(await row.locator('.followup-text').evaluate((e) => e.textContent), BOREALIS_TEXT);
+    assert.equal((await row.locator('.followup-copy').innerText()).trim(), 'Copier');
+    // Echo Systems and Foxtrot have no text: no copy button
+    assert.equal(await p.page.locator('#todo .followup-copy').count(), 1);
+    await row.locator('.followup-copy').click();
+    await p.page.waitForFunction(() => window.__copied.length === 1);
+    assert.deepEqual(await p.page.evaluate(() => window.__copied), [BOREALIS_TEXT]);
+    await toastText(p, /copié/);
+    assert.equal(await row.locator('.req-err').isVisible(), false);
+    await p.page.evaluate(() => { window.__clipFail = true; });
+    await row.locator('.followup-copy').click();
+    await row.locator('.req-err').waitFor();
+    assert.equal((await row.locator('.req-err').innerText()).trim(), 'Copie impossible : sélectionnez le texte.');
+    assert.equal(await p.page.evaluate(() => getSelection().toString()), BOREALIS_TEXT);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Accueil: no ready dossier and no proposal to confirm, no « À envoyer » / « À confirmer » section and no error', async () => {
+  const docs = withProposals([proposal(P_DELTA, 4, 'Delta Labs', 'Applied', 'Interview')]);
+  patchApp(docs, 1, { dossier: { ...dossierOf(1), state: 'a_refaire' } });
+  docs[`handled/${P_DELTA}`] = { message_id: P_DELTA, at: '2026-11-26T10:00:00Z' };
+  const p = await open({ docs });
+  try {
+    await go(p, 'accueil');
+    await p.page.waitForFunction(() => document.querySelector('[data-count=messages]'));
+    assert.equal(await p.page.locator('#to-send, #to-confirm').count(), 0);
+    assert.doesNotMatch(await p.page.locator(body('accueil')).innerText(), /À envoyer|À confirmer|erreur|impossible/i);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+for (const width of [360, 430]) {
+  test(`Accueil lists at ${width}px: no horizontal overflow, every control at least 44px tall`, async () => {
+    const long = 'Responsable-des-partenariats-strategiques-et-de-l-innovation-ouverte';
+    const docs = withProposals([
+      proposal(P_COBALT, 3, 'Cobalt SAS', 'Applied', 'Assessment', { from: `${long}@exemple.test`, subject: long, excerpt: `${long} ${long}` }),
+      proposal(P_HOSTILE, 8, HOSTILE, 'SKIP', 'Applied'),
+    ]);
+    patchApp(docs, 1, { company: long, role: long });
+    const p = await open({ docs, device: { width, height: 900 }, reducedMotion: true });
+    try {
+      await go(p, 'accueil');
+      await p.page.locator('#to-confirm').waitFor();
+      await p.page.locator('#to-send').waitFor();
+      const r = await p.page.evaluate(overflowScan);
+      assert.ok(r.sw <= r.W, `scrollWidth ${r.sw} > ${r.W}`);
+      assert.deepEqual(r.bad, []);
+      assert.deepEqual(await p.page.evaluate(tooSmall, body('accueil')), []);
+      await p.page.screenshot({ path: join(SHOTS, `accueil-lists-${width}.png`), fullPage: true });
+      assert.deepEqual(p.errors, []);
+    } finally { await p.close(); }
+  });
+}

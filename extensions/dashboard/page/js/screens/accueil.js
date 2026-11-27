@@ -1,9 +1,16 @@
-/* Accueil: greeting, weekly goal ring, 4 KPI cards, « À faire », mini-week, sync date. Classic script. */
+/* Accueil: greeting, weekly goal ring, 4 KPI cards, « À faire » (follow-up texts to copy), « À envoyer » (ready dossiers),
+ * « À confirmer » (status proposals), mini-week, sync date. Classic script. */
 (() => {
   'use strict';
   const Screens = (globalThis.Screens = globalThis.Screens || {});
   const EMPTY = ['Rien à afficher pour l\'instant', 'La première synchronisation n\'a pas encore eu lieu. Ouvrez une session career-ops : Claude enverra vos données ici.'];
   const ACTIVE = new Set(['Applied', 'Responded', 'Assessment', 'Interview', 'Offer']);
+  const PROPOSAL_ID = /^p-[0-9a-f]{16}$/;
+  const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const txt = (v) => (typeof v === 'string' ? v.trim() : '');
+  const parisDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' });
+  const dismissed = new Set(); // proposals confirmed or ignored here, hidden before the handled/ listener delivers
+  const shown = { followTexts: [], proposals: new Map() }; // what the last paint shows, for the click handlers
 
   function greeting(first) {
     const h = CapUI.parisHour();
@@ -29,6 +36,73 @@
     if (e && Number.isFinite(e.startMs)) return e.startMs;
     const t = Date.parse(e && e.start && typeof e.start.dateTime === 'string' ? e.start.dateTime : '');
     return Number.isNaN(t) ? null : t;
+  }
+
+  // The status a row will have once the pending requests are applied (CapData), else its status in the snapshot.
+  const expected = (num, fallback) => (globalThis.CapData && CapData.expectedStatus(num)) || fallback;
+
+  // « À envoyer »: the applications whose dossier is ready and that are not sent (nor closed, nor asked to be), oldest
+  // prepared first.
+  function toSend(apps) {
+    const at = (a) => { const t = Date.parse(a.dossier.prepared_at); return Number.isNaN(t) ? Infinity : t; };
+    return apps.filter((a) => {
+      if (!isObj(a) || !Number.isInteger(a.num) || !isObj(a.dossier) || a.dossier.state !== 'pret') return false;
+      const st = expected(a.num, a.status);
+      return !CapUI.isoDay(a.applied_on) && !CapUI.SENT.has(st) && !CapUI.CLOSED.has(st);
+    }).sort((a, b) => (at(a) - at(b)) || a.num - b.num);
+  }
+
+  // « À confirmer »: the well-formed proposals not handled yet, whose target is not already the expected status.
+  function toConfirm(snap) {
+    const handled = globalThis.CapData ? CapData.handledIds() : new Set();
+    const seen = new Set();
+    return (Array.isArray(snap.proposals) ? snap.proposals : []).filter((p) => {
+      if (!isObj(p) || typeof p.id !== 'string' || !PROPOSAL_ID.test(p.id) || seen.has(p.id)) return false;
+      if (!Number.isInteger(p.ref) || p.ref < 1 || !CapUI.STATUSES.includes(p.to_status) || !isObj(p.evidence)) return false;
+      seen.add(p.id);
+      if (handled.has(p.id) || dismissed.has(p.id)) return false;
+      const st = expected(p.ref, null);
+      return st != null && st !== p.to_status; // unknown row: nothing to confirm
+    });
+  }
+
+  const statusChip = (s) => `<span class="status s-${CapUI.tone(s)}">${CapUI.esc(CapUI.statusLabel(s))}</span>`;
+
+  function sendHtml(list) {
+    const { esc } = CapUI;
+    const rows = list.map((a) => {
+      const t = Date.parse(a.dossier.prepared_at);
+      const when = Number.isNaN(t) ? '' : ` · prêt le ${CapUI.fmtDay(parisDay.format(new Date(t)))}`;
+      const letter = a.dossier.letter_state === 'a_completer' ? '<span class="send-note">lettre à compléter</span>' : '';
+      return `<li class="todo-item" data-send="${esc(a.num)}"><span class="todo-ico">${CapUI.ICON.send}</span>
+        <button type="button" class="todo-link" data-open="${esc(a.num)}"><span><strong>${esc(txt(a.company) || 'Entreprise non précisée')}</strong></span>
+          <span class="todo-sub">${esc(txt(a.role))}${esc(when)}</span>${letter}</button></li>`;
+    }).join('');
+    return `<section class="card glass rise" style="--i:6" id="to-send" aria-labelledby="to-send-title"><h2 id="to-send-title" class="card-title">À envoyer</h2>
+      <ul class="todo-list">${rows}</ul></section>`;
+  }
+
+  function confirmHtml(list, apps) {
+    const { esc } = CapUI;
+    const byNum = new Map(apps.filter(isObj).map((a) => [a.num, a]));
+    const rows = list.map((p) => {
+      const app = byNum.get(p.ref);
+      const company = txt(p.company) || (app && txt(app.company)) || 'Entreprise non précisée';
+      const from = CapUI.STATUSES.includes(p.from_status) ? p.from_status : app && app.status;
+      const ev = p.evidence;
+      const date = CapUI.isoDay(ev.date) ? CapUI.fmtDay(ev.date) : CapUI.fmtStamp(ev.date);
+      const meta = [txt(ev.from), date === '—' ? '' : date].filter(Boolean).map(esc).join(' · ');
+      return `<li class="prop" data-proposal="${esc(p.id)}">
+        <p class="prop-head"><strong class="prop-co">${esc(company)}</strong>
+          <span class="prop-move">${from ? statusChip(from) : ''}<span class="prop-arrow">→</span>${statusChip(p.to_status)}</span></p>
+        <div class="prop-proof">${meta ? `<p class="prop-meta">${meta}</p>` : ''}${txt(ev.subject) ? `<p class="prop-subj">${esc(txt(ev.subject))}</p>` : ''}${txt(ev.excerpt) ? `<p class="prop-excerpt">${esc(txt(ev.excerpt))}</p>` : ''}</div>
+        <div class="req-row prop-actions"><button type="button" class="btn btn-acc" id="confirm-${esc(p.id)}" data-confirm>Confirmer</button>
+          <button type="button" class="btn btn-soft" id="ignore-${esc(p.id)}" data-ignore>Ignorer</button></div>
+        <p class="req-err" role="alert" hidden></p></li>`;
+    }).join('');
+    return `<section class="card glass rise" style="--i:6" id="to-confirm" aria-labelledby="to-confirm-title"><h2 id="to-confirm-title" class="card-title">À confirmer</h2>
+      <p class="card-note">Statuts proposés d'après vos e-mails. Confirmer crée une demande que Claude appliquera.</p>
+      <ul class="prop-list">${rows}</ul></section>`;
   }
 
   function todoHtml(snap, apps, state, ctx, today) {
@@ -59,11 +133,19 @@
       if (mail.status === 'loading' || cal.status === 'loading') items.push('<li class="todo-quiet">Outlook : chargement…</li>');
       if (o.stale) items.push('<li class="todo-quiet">Outlook : peut-être pas à jour</li>');
     }
+    const texts = [];
     for (const f of snap.followups_due || []) {
-      items.push(`<li class="todo-item" data-followup><span class="todo-ico">${CapUI.ICON.clock}</span>
+      // the follow-up text to copy, when the Suivi wrote one: shown as is (line breaks kept), copied from the data
+      const text = f && typeof f.text === 'string' && f.text.trim() ? f.text : '';
+      const copy = text ? `<div class="followup-box"><p class="msg-text followup-text">${esc(text)}</p>
+        <div class="req-row"><button type="button" class="btn btn-soft followup-copy" data-copy="${texts.length}">${CapUI.ICON.copy}<span>Copier</span></button></div>
+        <p class="req-err" role="alert" hidden></p></div>` : '';
+      if (text) texts.push(text);
+      items.push(`<li class="todo-item${text ? ' todo-follow' : ''}" data-followup><span class="todo-ico">${CapUI.ICON.clock}</span>
         <button type="button" class="todo-link" data-open="${esc(f.num)}"><span>Relancer <strong>${esc(f.company)}</strong></span><span class="todo-sub">${esc(f.role)}</span></button>
-        <span class="badge ${f.urgency === 'urgent' ? 'badge-acc' : 'badge-warn'}">${f.urgency === 'urgent' ? 'Urgent' : 'En retard'}</span></li>`);
+        <span class="badge ${f.urgency === 'urgent' ? 'badge-acc' : 'badge-warn'}">${f.urgency === 'urgent' ? 'Urgent' : 'En retard'}</span>${copy}</li>`);
     }
+    shown.followTexts = texts;
     for (const a of apps) {
       if (!CapUI.isoDay(a.closes_at) || CapUI.CLOSED.has(a.status)) continue;
       const d = CapUI.daysBetween(today, a.closes_at);
@@ -91,7 +173,7 @@
       if (!CapUI.CLOSED.has(a.status)) mark(a.closes_at, 'close', `Clôture · ${a.company}`);
     }
     const o = ctx.outlook;
-    if (o && o.status === 'ok') for (const e of o.events || []) { const t = eventStart(e); if (t != null) mark(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date(t)), 'meet', `Entretien · ${e.subject || ''}`); }
+    if (o && o.status === 'ok') for (const e of o.events || []) { const t = eventStart(e); if (t != null) mark(parisDay.format(new Date(t)), 'meet', `Entretien · ${e.subject || ''}`); }
     let days = '';
     for (let i = 0; i < 7; i++) {
       const d = CapUI.addDays(wk.mon, i);
@@ -123,11 +205,15 @@
     if (h1) h1.textContent = greeting(snap && snap.profile && typeof snap.profile.first_name === 'string' ? snap.profile.first_name : '');
     if (!CapUI.gate(root, state, EMPTY)) return;
     const today = CapUI.today();
-    const sig = JSON.stringify([snap.generation, state.pending.map((p) => p.id + p.state), state.prefs.weekly_goal, outlookSig(ctx.outlook), today, state.stale, h1 && h1.textContent]);
-    CapUI.rebuild(root, 'accueil', sig, () => paint(root, state, ctx, today));
+    const apps = Array.isArray(snap.apps) ? snap.apps : [];
+    // both lists also depend on the handled/ store and on requests written here (CapData), not only on `state`
+    const lists = { send: toSend(apps), confirm: toConfirm(snap) };
+    const sig = JSON.stringify([snap.generation, state.pending.map((p) => p.id + p.state), state.prefs.weekly_goal, outlookSig(ctx.outlook), today, state.stale, h1 && h1.textContent,
+      lists.send.map((a) => a.num), lists.confirm.map((p) => p.id)]);
+    CapUI.rebuild(root, 'accueil', sig, () => paint(root, state, ctx, today, lists));
   }
 
-  function paint(root, state, ctx, today) {
+  function paint(root, state, ctx, today, lists) {
     const { esc } = CapUI;
     const snap = state.snapshot;
     const apps = Array.isArray(snap.apps) ? snap.apps : [];
@@ -166,8 +252,12 @@
         ${kpi('interviews', 'users', 'Entretiens', 'kpi-acc', 4)}
         ${kpi('offers', 'star', 'Offres reçues', '', 5)}
       </div>
-      <section class="card glass todo rise" style="--i:6" id="todo" aria-labelledby="todo-title"><h2 id="todo-title" class="card-title">À faire</h2>
-        <ul class="todo-list">${todoHtml(snap, apps, state, ctx, today)}</ul></section>
+      <div class="home-acts">
+        <section class="card glass todo rise" style="--i:6" id="todo" aria-labelledby="todo-title"><h2 id="todo-title" class="card-title">À faire</h2>
+          <ul class="todo-list">${todoHtml(snap, apps, state, ctx, today)}</ul></section>
+        ${lists.send.length ? sendHtml(lists.send) : ''}
+        ${lists.confirm.length ? confirmHtml(lists.confirm, apps) : ''}
+      </div>
       <nav class="quick" aria-label="Raccourcis">
         <a class="card glass tile rise" style="--i:7" href="#offres"><span class="tile-ico">${CapUI.ICON.target}</span><span>Offres à évaluer</span></a>
         <a class="card glass tile rise" style="--i:8" href="#candidatures"><span class="tile-ico">${CapUI.ICON.case}</span><span>Candidatures en cours</span></a>
@@ -177,6 +267,7 @@
       <p id="sync-note" class="sync${state.stale ? ' is-stale' : ''}">${esc(sync)}</p>
     </div>`;
 
+    shown.proposals = new Map(lists.confirm.map((p) => [p.id, p]));
     CapUI.countUp(root.querySelector('#goal-n'), done, { key: 'goal' });
     CapCharts.ring(root.querySelector('#goal-ring'), done, goal);
 
@@ -199,11 +290,56 @@
     }
   }
 
+  const showErr = (box, msg) => { const e = box.querySelector('.req-err'); e.textContent = msg; e.hidden = !msg; };
+
+  async function copyFollowup(btn) {
+    const box = btn.closest('.followup-box');
+    const text = shown.followTexts[Number(btn.dataset.copy)];
+    if (!box || text == null) return;
+    showErr(box, '');
+    if (await CapUI.copyText(text, box.querySelector('.followup-text'))) CapUI.toast('Texte de relance copié.');
+    else showErr(box, CapUI.COPY_FAILED);
+  }
+
+  // « Confirmer »: a status request, then the proposal is marked handled. « Ignorer »: only marked handled.
+  async function settleProposal(root, li, confirm) {
+    const p = shown.proposals.get(li.dataset.proposal);
+    if (!p || li.dataset.busy) return;
+    li.dataset.busy = '1';
+    const buttons = li.querySelectorAll('button');
+    buttons.forEach((b) => { b.disabled = true; });
+    showErr(li, '');
+    try {
+      if (confirm) {
+        await CapData.requestStatus(p.ref, p.to_status);
+        dismissed.add(p.id); // the request is written: the proposal is done even if marking it fails below
+      }
+      await CapData.markHandled(p.id);
+      dismissed.add(p.id);
+    } catch (err) {
+      if (!dismissed.has(p.id)) {
+        delete li.dataset.busy;
+        buttons.forEach((b) => { b.disabled = false; });
+        showErr(li, (err && err.message) || 'La demande n\'a pas pu être enregistrée.');
+        return;
+      }
+    }
+    const sec = li.closest('#to-confirm');
+    li.remove();
+    if (sec && !sec.querySelector('[data-proposal]')) sec.remove();
+    const next = root.querySelector('#to-confirm [data-confirm]');
+    if (next && (!document.activeElement || document.activeElement === document.body)) next.focus();
+  }
+
   // one delegated listener per root
   function bind(root) {
     if (root.__capAccueil) return;
     root.__capAccueil = true;
     root.addEventListener('click', (e) => {
+      const copy = e.target.closest('[data-copy]');
+      if (copy) { copyFollowup(copy); return; }
+      const act = e.target.closest('[data-confirm], [data-ignore]');
+      if (act) { const li = act.closest('[data-proposal]'); if (li) settleProposal(root, li, act.hasAttribute('data-confirm')); return; }
       const b = e.target.closest('[data-open]');
       if (!b) return;
       const n = parseInt(b.dataset.open, 10);

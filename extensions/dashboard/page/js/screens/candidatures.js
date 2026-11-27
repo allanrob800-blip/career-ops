@@ -260,16 +260,8 @@
     if (copy) {
       copy.addEventListener('click', async () => {
         showErr('#err-copy', '');
-        try {
-          if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') throw new Error('no clipboard');
-          await navigator.clipboard.writeText(d.message);
-          CapUI.toast('Message copié.');
-        } catch {
-          showErr('#err-copy', 'Copie impossible : sélectionnez le texte.');
-          const sel = getSelection(), range = document.createRange();
-          range.selectNodeContents(space.querySelector('.msg-text'));
-          sel.removeAllRanges(); sel.addRange(range);
-        }
+        if (await CapUI.copyText(d.message, space.querySelector('.msg-text'))) CapUI.toast('Message copié.');
+        else showErr('#err-copy', CapUI.COPY_FAILED);
       });
     }
 

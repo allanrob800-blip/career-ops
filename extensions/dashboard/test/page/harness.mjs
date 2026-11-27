@@ -1,6 +1,7 @@
 // Playwright harness: static server for page/, fake-claude injection, error collection.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join, extname, dirname, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, devices } from 'playwright';
@@ -36,7 +37,11 @@ export async function startServer() {
   return { url: `http://127.0.0.1:${port}/`, close: () => new Promise((r) => server.close(r)) };
 }
 
-export function launchBrowser() { return chromium.launch(); }
+// Preinstalled browser when the library/browser versions differ; plain launch() elsewhere.
+const PREINSTALLED = '/opt/pw-browsers/chromium';
+export function launchBrowser() {
+  return existsSync(PREINSTALLED) ? chromium.launch({ executablePath: PREINSTALLED }) : chromium.launch();
+}
 
 function contextOptions(device) {
   if (device === 'iPhone 15 Pro Max') {

@@ -313,6 +313,8 @@ svg text { paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-lin
 .todo-sub { font-size: .85rem; color: var(--muted); }
 .todo-item a { text-decoration: none; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
 .todo-quiet { color: var(--muted); font-size: .9rem; padding: 6px 4px; }
+.todo-quiet a { display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: 3px; }
+.todo-item[data-outlook-note] a { overflow-wrap: anywhere; }
 .todo-calm { padding: 10px 4px; }
 
 .quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-content: start; }

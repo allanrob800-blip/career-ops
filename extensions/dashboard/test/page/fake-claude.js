@@ -5,7 +5,8 @@
  *
  * State:  window.__fake = { db: {docs: {'snapshot/meta': {...}, 'requests/abc': {...}}},
  *                           mcp: {mode: 'ok'|'null'|'error', code, retryable, shape: 'array'|'blocks',
- *                                 emails: [...], events: [...], storedAt, latencyMs, deny},
+ *                                 emails: [...], events: [...], storedAt, latencyMs, deny,
+ *                                 byTool: {outlook_calendar_search: {mode, code, ...}}},   (per-tool overrides)
  *                           user: {id: 'u1'} }      (a missing/partial `db`, `db.docs` or `mcp` is normalized;
  *                                                    every field is read at call time, so tests may change it live)
  * Calls:  window.__calls = [{ns, fn, args}] — every fake API call, in order.
@@ -191,17 +192,18 @@
   const mcpCfg = () => (fake.mcp = fake.mcp || {}); // harness may replace fake.mcp after init
   const sorted = (k, v) => (isPlain(v) ? Object.fromEntries(Object.keys(v).sort().map((key) => [key, v[key]])) : v);
   const identity = (server, tool, input) => JSON.stringify([server, tool, input ?? {}], sorted);
-  function mcpError(code) {
+  const toolCfg = (tool) => ({ ...mcpCfg(), ...((mcpCfg().byTool || {})[tool] || {}) }); // byTool overrides the rest
+  function mcpError(code, retryable) {
     const e = { code, server: MCP_SERVER, message: `fake ${code}` };
-    if (mcpCfg().retryable) e.retryable = true;
+    if (retryable) e.retryable = true;
     return e;
   }
   // -> {error: McpError} | {result: CallToolResult}, from the configuration at call time
   function outcome(server, tool) {
-    const c = mcpCfg();
+    const c = toolCfg(tool);
     if (server !== MCP_SERVER) return { error: mcpError('server_not_found') };
     if (!(tool in MCP_TOOLS)) return { error: mcpError('not_in_manifest') };
-    if (c.mode === 'error') return { error: mcpError(c.code || 'upstream_error') };
+    if (c.mode === 'error') return { error: mcpError(c.code || 'upstream_error', c.retryable) };
     const items = clone(c[MCP_TOOLS[tool]] || []);
     const result = c.shape === 'blocks'
       ? { content: items.map((it) => ({ type: 'text', text: JSON.stringify(it) })), payload: items[0] }
@@ -234,8 +236,9 @@
     },
     async callTool(server, tool, input) {
       rec('mcp', 'callTool', [server, tool, input]);
-      const c = mcpCfg();
-      if (c.mode === 'error' && (c.code === 'approval_required' || c.code === 'consent_required') && !c.deny) c.mode = 'ok';
+      const own = (mcpCfg().byTool || {})[tool];
+      const c = own && own.mode ? own : mcpCfg(); // the object that holds this tool's mode
+      if (c.mode === 'error' && (c.code === 'approval_required' || c.code === 'consent_required') && !toolCfg(tool).deny) c.mode = 'ok';
       const o = outcome(server, tool);
       if (o.error) throw o.error;
       return o.result;

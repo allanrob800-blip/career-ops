@@ -225,6 +225,66 @@ test('an authorization error on one watch retracts the whole section: nothing st
   } finally { await p.close(); }
 });
 
+// Accueil reads each section: a failure of one must not look like « nothing to process ».
+const notes = (p) => p.page.locator('#todo [data-outlook-note]');
+test('Accueil: mail needs approval while the calendar works: approval copy for messages, next interview kept', async () => {
+  const p = await open({ mcp: { byTool: { outlook_email_search: { mode: 'error', code: 'approval_required' } } } });
+  try {
+    await go(p, 'planning');
+    await go(p, 'accueil');
+    await notes(p).first().waitFor();
+    assert.equal(await notes(p).count(), 1);
+    const link = p.page.locator('#todo [data-outlook-note="mail"] a[href="#messages"]');
+    assert.match(await link.innerText(), /Autorisez l'accès à Outlook pour afficher vos messages\./);
+    const todo = await p.page.locator('#todo').innerText();
+    assert.match(todo, /Prochain entretien : Point avec Acme/);
+    assert.equal(await p.page.locator('[data-count=messages]').count(), 0);
+    assert.equal(await p.page.locator('#todo button', { hasText: 'Autoriser Outlook' }).count(), 0);
+    await link.click();
+    await go(p, 'messages', 'error'); // the button lives on the screen the line links to
+    assert.equal(await p.page.locator(`${body('messages')} button`, { hasText: 'Autoriser Outlook' }).count(), 1);
+    assert.equal((await mcpCalls(p)).filter((c) => c.fn === 'callTool').length, 0);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Accueil: calendar needs a reconnection while mail works: messages count kept, calendar reason shown', async () => {
+  const p = await open({ mcp: { byTool: { outlook_calendar_search: { mode: 'error', code: 'needs_reauth' } } } });
+  try {
+    await go(p, 'messages');
+    await go(p, 'accueil');
+    await notes(p).first().waitFor();
+    assert.equal(await notes(p).count(), 1);
+    assert.match(await p.page.locator('#todo [data-outlook-note="calendar"] a[href="#planning"]').innerText(), COPY.needs_reauth);
+    assert.equal((await p.page.locator('[data-count=messages]').innerText()).trim(), '2');
+    assert.doesNotMatch(await p.page.locator('#todo').innerText(), /Prochain entretien/);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('Accueil: both sections failing with the same reason give one line, different reasons give two', async () => {
+  const same = await open({ mcp: { mode: 'error', code: 'needs_reauth' } });
+  try {
+    await go(same, 'messages', 'error');
+    await go(same, 'planning', 'error');
+    await go(same, 'accueil');
+    await notes(same).first().waitFor();
+    assert.equal(await notes(same).count(), 1);
+    assert.match(await same.page.locator('#todo [data-outlook-note] a[href="#messages"]').innerText(), COPY.needs_reauth);
+    assert.equal((await same.page.locator('#todo').innerText()).match(/Reconnectez/g).length, 1);
+  } finally { await same.close(); }
+  const two = await open({ mcp: { mode: 'error', code: 'needs_reauth', byTool: { outlook_calendar_search: { code: 'server_unavailable' } } } });
+  try {
+    await go(two, 'messages', 'error');
+    await go(two, 'planning', 'error');
+    await go(two, 'accueil');
+    await notes(two).nth(1).waitFor();
+    assert.match(await two.page.locator('#todo [data-outlook-note="mail"]').innerText(), COPY.needs_reauth);
+    assert.match(await two.page.locator('#todo [data-outlook-note="calendar"]').innerText(), COPY.server_unavailable);
+    assert.deepEqual(two.errors, []);
+  } finally { await two.close(); }
+});
+
 test('transient error after a good delivery keeps the data with « peut-être pas à jour »', async () => {
   const p = await open({ mcp: { storedAt: Date.parse('2026-11-27T08:30:00Z') } });
   try {

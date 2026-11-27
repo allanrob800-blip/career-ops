@@ -20,7 +20,8 @@
 
   function outlookSig(o) {
     if (!o) return null;
-    return [o.status, o.reason, o.stale, o.storedAt, (o.messages || []).map((m) => `${m && m.id}:${m && m.handled}`), (o.events || []).map((e) => [e && e.subject, e && e.startMs])];
+    const sec = (s) => s && [s.status, s.reason];
+    return [o.status, o.reason, o.stale, o.storedAt, sec(o.mail), sec(o.calendar), (o.messages || []).map((m) => `${m && m.id}:${m && m.handled}`), (o.events || []).map((e) => [e && e.subject, e && e.startMs])];
   }
 
   // CapOutlook resolves the {dateTime, timeZone} wall-clock pair into startMs.
@@ -35,14 +36,28 @@
     const items = [];
     const o = ctx.outlook;
     if (!o) items.push('<li class="todo-quiet">Outlook non connecté</li>');
-    else if (o.status === 'ok') {
-      const n = (o.messages || []).filter((m) => m && !m.handled).length;
-      if (n) items.push(`<li class="todo-item"><span class="todo-ico">${CapUI.ICON.chat}</span><a href="#messages"><span data-count="messages">${esc(n)}</span> ${n > 1 ? 'messages' : 'message'} à traiter</a></li>`);
-      const next = (o.events || []).map((e) => ({ e, t: eventStart(e) })).filter((x) => x.t != null && x.t >= Date.now()).sort((a, b) => a.t - b.t)[0];
-      if (next) items.push(`<li class="todo-item"><span class="todo-ico">${CapUI.ICON.users}</span><span>Prochain entretien : <strong>${esc(next.e.subject || 'Entretien')}</strong> · ${esc(CapUI.fmtStamp(new Date(next.t).toISOString()))}</span></li>`);
+    else {
+      // Each Outlook section speaks for itself: a failed one shows its reason in place of its line, with a link
+      // to the screen that explains it (and holds « Autoriser Outlook »). One line when both say the same thing.
+      const mail = o.mail || o;
+      const cal = o.calendar || o;
+      const failed = (s) => s.status === 'error' || s.status === 'unavailable';
+      const note = (s, id, route) => {
+        const text = esc(s.reason || 'Outlook indisponible pour l\'instant');
+        return s.status === 'error'
+          ? `<li class="todo-item" data-outlook-note="${id}"><span class="todo-ico">${CapUI.ICON.gap}</span><a href="#${route}">${text}</a></li>`
+          : `<li class="todo-quiet" data-outlook-note="${id}"><a href="#${route}">${text}</a></li>`;
+      };
+      if (mail.status === 'ok') {
+        const n = (o.messages || []).filter((m) => m && !m.handled).length;
+        if (n) items.push(`<li class="todo-item"><span class="todo-ico">${CapUI.ICON.chat}</span><a href="#messages"><span data-count="messages">${esc(n)}</span> ${n > 1 ? 'messages' : 'message'} à traiter</a></li>`);
+      } else if (failed(mail)) items.push(note(mail, 'mail', 'messages'));
+      if (cal.status === 'ok') {
+        const next = (o.events || []).map((e) => ({ e, t: eventStart(e) })).filter((x) => x.t != null && x.t >= Date.now()).sort((a, b) => a.t - b.t)[0];
+        if (next) items.push(`<li class="todo-item"><span class="todo-ico">${CapUI.ICON.users}</span><span>Prochain entretien : <strong>${esc(next.e.subject || 'Entretien')}</strong> · ${esc(CapUI.fmtStamp(new Date(next.t).toISOString()))}</span></li>`);
+      } else if (failed(cal) && !(failed(mail) && mail.reason === cal.reason)) items.push(note(cal, 'calendar', 'planning'));
+      if (mail.status === 'loading' || cal.status === 'loading') items.push('<li class="todo-quiet">Outlook : chargement…</li>');
       if (o.stale) items.push('<li class="todo-quiet">Outlook : peut-être pas à jour</li>');
-    } else {
-      items.push(`<li class="todo-quiet">${o.status === 'loading' ? 'Outlook : chargement…' : esc(o.reason || 'Outlook indisponible pour l\'instant')}</li>`);
     }
     for (const f of snap.followups_due || []) {
       items.push(`<li class="todo-item" data-followup><span class="todo-ico">${CapUI.ICON.clock}</span>

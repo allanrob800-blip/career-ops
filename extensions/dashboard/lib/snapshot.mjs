@@ -39,6 +39,31 @@ function addDaysIso(iso, n) {
 
 const isoDay = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(String(s ?? '').trim()) ? String(s).trim() : null);
 const httpsOrNull = (u) => (typeof u === 'string' && u.startsWith('https://') ? u : null);
+const ASSET_ID = /^[A-Za-z0-9_-]{8,128}$/;
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * The CV assets recorded in data/dashboard.json (`cv_assets["<tracker num>"] = {asset_id, file, sha256}`), from its
+ * raw text. Malformed JSON or another shape gives {}; only object entries under an integer key are kept.
+ * export.mjs uses it too, to find the files to hash.
+ */
+export function parseCvAssets(text) {
+  let doc = null;
+  try { doc = JSON.parse(String(text ?? '')); } catch { return {}; }
+  const out = {};
+  if (!isObj(doc) || !isObj(doc.cv_assets)) return out;
+  for (const [k, v] of Object.entries(doc.cv_assets)) if (/^\d+$/.test(k) && isObj(v)) out[String(parseInt(k, 10))] = v;
+  return out;
+}
+
+// cv_url only for an asset id the platform could have issued; cv_stale only when export hashed the recorded file
+// (input.cvFileHashes: {file: sha256 hex}): true means the CV was regenerated after its upload.
+function cvFor(entry, hashes) {
+  if (!entry || typeof entry.asset_id !== 'string' || !ASSET_ID.test(entry.asset_id)) return { cv_url: null, cv_stale: null };
+  const cur = typeof entry.file === 'string' && Object.hasOwn(hashes, entry.file) ? hashes[entry.file] : null;
+  const rec = typeof entry.sha256 === 'string' ? entry.sha256.toLowerCase() : null;
+  return { cv_url: `/_blob/${entry.asset_id}`, cv_stale: typeof cur === 'string' ? cur.toLowerCase() !== rec : null };
+}
 
 function parseTracker(content) {
   const lines = String(content ?? '').replace(/\r/g, '').split('\n');
@@ -121,6 +146,8 @@ export function buildSnapshot(input) {
   const reportByNum = new Map(reports.map((r) => [r.num, r]));
   const { due, byNum: fu } = followupsDue(input.trackerContent, input.followupsContent, input.statusLogContent, today);
   const { normalizeCompany, domainsFromUrl } = match();
+  const cvAssets = parseCvAssets(input.dashboardJson);
+  const cvHashes = isObj(input.cvFileHashes) ? input.cvFileHashes : {};
 
   const apps = rows.filter((row) => CANONICAL.has(statusByNum.get(row.num))).map((row) => {
     const status = statusByNum.get(row.num);
@@ -145,6 +172,7 @@ export function buildSnapshot(input) {
       next_followup: f ? f.next : null,
       followup_urgency: f ? f.urgency : null,
       closes_at: (url && closeDateForUrl(closeIndex, url)) || null,
+      ...cvFor(cvAssets[String(row.num)], cvHashes),
     };
   });
 

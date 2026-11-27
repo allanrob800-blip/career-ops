@@ -14,6 +14,8 @@
     if (typeof url !== 'string' || !/^https:\/\//i.test(url.trim())) return null;
     try { const u = new URL(url.trim()); return u.protocol === 'https:' && u.hostname ? u.href : null; } catch { return null; }
   }
+  // A CV asset served by the platform: exactly /_blob/<asset id>, nothing else. Returns it or null.
+  const blobHref = (v) => (typeof v === 'string' && /^\/_blob\/[A-Za-z0-9_-]{8,128}$/.test(v) ? v : null);
   const hostOf = (url) => { const h = safeHref(url); return h ? new URL(h).hostname.replace(/^www\./, '') : null; };
   const fold = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -240,7 +242,7 @@
   const intent = {}; // cross-screen requests: { openApp: 3 } for Candidatures, { offerQuery: 'Acme' } for Offres
 
   globalThis.CapUI = {
-    esc, safeHref, hostOf, fold, countUp, toast, dialog, closeDialog, trapTab, gate, rebuild, reduced, emptyBlock, outlookNote, incompleteNote, INCOMPLETE,
+    esc, safeHref, blobHref, hostOf, fold, countUp, toast, dialog, closeDialog, trapTab, gate, rebuild, reduced, emptyBlock, outlookNote, incompleteNote, INCOMPLETE,
     STATUSES, statusLabel, tone, isSent, figures, SENT, REPLIED, INTERVIEWED, OFFERED, CLOSED,
     today, parisHour, isoDay, addDays, daysBetween, week, fmtDay, fmtLong, fmtWeekday, fmtStamp, fmtNum, fmtPct, plural,
     ICON, cleanBullet, intent,

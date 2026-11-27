@@ -343,3 +343,71 @@ for (const [label, mcp, count] of [
     } finally { await p.close(); }
   });
 }
+
+// ---- CV link in the detail sheet: only /_blob/<asset id>, never anything else ----
+const CV_ID = '0123456789abcdef0123456789abcdef'; // the fixture root's fictional asset for app 1
+const withApp = (num, patch) => {
+  const docs = structuredClone(DOCS);
+  for (const [k, v] of Object.entries(docs)) if (k.startsWith('snapshot/apps-')) for (const a of v.items) if (a.num === num) Object.assign(a, patch);
+  return docs;
+};
+async function openSheet(p, num) {
+  await go(p, 'candidatures');
+  await p.page.locator(`#app-list [data-num="${num}"] .row-open`).click();
+  const dlg = p.page.locator('.dlg[role=dialog][aria-modal=true]');
+  await dlg.waitFor();
+  return dlg;
+}
+
+test('CV link: the detail sheet opens /_blob/<id> in a new tab, >= 44px, row marked « CV »', async () => {
+  const p = await open({ device: { width: 430, height: 900 }, reducedMotion: true });
+  try {
+    await go(p, 'candidatures');
+    assert.equal(await p.page.locator('#app-list [data-num="1"] .cv-mark').count(), 1);
+    assert.equal(await p.page.locator('#app-list [data-num="3"] .cv-mark').count(), 0);
+    assert.equal(await p.page.locator('#app-list .cv-mark').count(), 1); // app 8's hostile asset id was dropped by export
+    const dlg = await openSheet(p, 1);
+    const link = dlg.locator('a.cv-link');
+    assert.equal(await link.count(), 1);
+    assert.equal(await link.getAttribute('href'), `/_blob/${CV_ID}`);
+    assert.equal(await link.getAttribute('target'), '_blank');
+    assert.match(await link.getAttribute('rel'), /\bnoopener\b/);
+    assert.equal(await link.getAttribute('download'), null);
+    assert.equal((await link.innerText()).trim(), 'Ouvrir le CV (PDF)');
+    const b = await link.boundingBox();
+    assert.ok(b.height >= 44, `cv link ${b.height}px`);
+    assert.equal(await dlg.locator('.cv-stale').count(), 0);
+    assert.deepEqual(await p.page.evaluate(tooSmall, '.dlg'), []);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('CV link: hostile or malformed cv_url values are never linked', async () => {
+  for (const bad of ['javascript:alert(1)', 'https://evil.example/x.pdf', '/_blob/../x', '/_blob/short', `/_blob/${CV_ID}?x=1`, ` /_blob/${CV_ID}`,
+    `//evil.example/_blob/${CV_ID}`, `/_blob/${CV_ID}/`, `/_blob/${CV_ID}"onmouseover="alert(1)`, `/_blob/${'a'.repeat(129)}`, 42, { href: 'x' }]) {
+    const p = await open({ docs: withApp(1, { cv_url: bad, cv_stale: true }) });
+    try {
+      await go(p, 'candidatures');
+      assert.equal(await p.page.locator('.cv-mark').count(), 0, String(bad));
+      const dlg = await openSheet(p, 1);
+      assert.equal(await dlg.locator('a.cv-link').count(), 0, String(bad));
+      assert.equal(await dlg.locator('.cv-stale').count(), 0, String(bad));
+      assert.equal(await p.page.locator('a[href*="_blob"], a[href^="javascript"], a[href*="evil"]').count(), 0, String(bad));
+      assert.deepEqual(p.dialogs, []);
+      assert.deepEqual(p.errors, []);
+    } finally { await p.close(); }
+  }
+});
+
+test('CV link: a stale CV shows the French note; no overflow with the sheet open at 360px', async () => {
+  const p = await open({ device: { width: 360, height: 800 }, reducedMotion: true, docs: withApp(1, { cv_stale: true }) });
+  try {
+    const dlg = await openSheet(p, 1);
+    assert.equal(await dlg.locator('a.cv-link').getAttribute('href'), `/_blob/${CV_ID}`);
+    assert.equal((await dlg.locator('.cv-stale').innerText()).trim(), 'Ce CV a été modifié depuis son envoi sur le tableau de bord.');
+    const r = await p.page.evaluate(overflowScan);
+    assert.ok(r.sw <= r.W, `scrollWidth ${r.sw} > ${r.W}`);
+    assert.deepEqual(r.bad, []);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});

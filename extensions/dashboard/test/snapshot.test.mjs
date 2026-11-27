@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSnapshot, loadMatch } from '../lib/snapshot.mjs';
+import { buildSnapshot, loadMatch, parseCvAssets } from '../lib/snapshot.mjs';
 import { loadFixtureInput } from './helpers.mjs';
 
 const STATES = ['Evaluated', 'Speculative', 'Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
@@ -113,4 +113,66 @@ test('a report linked only from the Notes cell attaches to its row', () => {
   const a = buildSnapshot(input).apps.find((x) => x.num === 1);
   assert.equal(a.report_num, 1);
   assert.equal(a.url, 'https://jobs.acme.fr/offres/product-manager-42');
+});
+
+// ---- CV links: data/dashboard.json -> cv_assets["<num>"] -> cv_url /_blob/<asset_id>, cv_stale from export's hashes ----
+const ID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+const SHA = 'aa'.repeat(32);
+const dash = (assets) => JSON.stringify({ slug: 'fictional-slug', cv_assets: assets });
+const appOf = (input, num) => buildSnapshot(input).apps.find((a) => a.num === num);
+
+test('cv_url: a valid asset_id for the app num gives /_blob/<id>; other apps get null', () => {
+  const input = loadFixtureInput(NOW);
+  input.dashboardJson = dash({ 3: { asset_id: ID, file: 'output/cv-cobalt.pdf', sha256: SHA } });
+  const s = buildSnapshot(input);
+  assert.equal(s.apps.find((a) => a.num === 3).cv_url, `/_blob/${ID}`);
+  assert.ok(s.apps.filter((a) => a.num !== 3).every((a) => a.cv_url === null && a.cv_stale === null));
+});
+
+test('cv_url: an asset_id outside [A-Za-z0-9_-]{8,128} is never linked', () => {
+  for (const bad of ['short', '../../etc', 'javascript:alert(1)', 'https://evil.example/x.pdf', 'a'.repeat(129), 'abcdefgh/..', 'abc def ghi', 12345678, null, '']) {
+    const input = loadFixtureInput(NOW);
+    input.dashboardJson = dash({ 3: { asset_id: bad, file: 'output/cv.pdf', sha256: SHA } });
+    input.cvFileHashes = { 'output/cv.pdf': 'bb'.repeat(32) };
+    const a = appOf(input, 3);
+    assert.equal(a.cv_url, null, String(bad));
+    assert.equal(a.cv_stale, null, String(bad));
+  }
+  const ok = loadFixtureInput(NOW);
+  ok.dashboardJson = dash({ 3: { asset_id: 'Ab_-0123', file: 'x', sha256: SHA } });
+  assert.equal(appOf(ok, 3).cv_url, '/_blob/Ab_-0123');
+});
+
+test('cv_url: absent, malformed or oddly shaped dashboard.json leaves every cv_url null, no throw', () => {
+  for (const json of [undefined, '', '{not json', 'null', '[]', '"x"', '{"slug":"s"}', '{"cv_assets":[]}', '{"cv_assets":{"3":"x"}}', '{"cv_assets":{"3":null}}']) {
+    const input = loadFixtureInput(NOW);
+    if (json !== undefined) input.dashboardJson = json;
+    const s = buildSnapshot(input);
+    assert.equal(s.apps.length, 8, String(json));
+    assert.ok(s.apps.every((a) => a.cv_url === null && a.cv_stale === null), String(json));
+  }
+});
+
+test('cv_stale: true when the file hash differs, false when it matches, null when the file was not hashed', () => {
+  const input = loadFixtureInput(NOW);
+  input.dashboardJson = dash({
+    1: { asset_id: ID, file: 'output/a.pdf', sha256: SHA },
+    3: { asset_id: ID, file: 'output/c.pdf', sha256: SHA.toUpperCase() },
+    4: { asset_id: ID, file: 'output/d.pdf', sha256: SHA },
+  });
+  input.cvFileHashes = { 'output/a.pdf': 'bb'.repeat(32), 'output/c.pdf': SHA };
+  const s = buildSnapshot(input);
+  const by = (n) => s.apps.find((a) => a.num === n);
+  assert.equal(by(1).cv_stale, true);
+  assert.equal(by(3).cv_stale, false);
+  assert.equal(by(4).cv_stale, null);
+  assert.equal(by(4).cv_url, `/_blob/${ID}`);
+});
+
+test('parseCvAssets: keeps only well-formed entries keyed by tracker num', () => {
+  assert.deepEqual(parseCvAssets('{bad'), {});
+  assert.deepEqual(parseCvAssets(undefined), {});
+  const got = parseCvAssets(dash({ 3: { asset_id: ID, file: 'output/c.pdf', sha256: SHA }, x: { asset_id: ID }, 4: 'nope' }));
+  assert.deepEqual(Object.keys(got), ['3']);
+  assert.equal(got['3'].file, 'output/c.pdf');
 });

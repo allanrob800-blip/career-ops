@@ -24,6 +24,8 @@
     }).join('');
   }
 
+  const cvMark = (a) => (CapUI.blobHref(a.cv_url) ? '<span class="cv-mark" title="CV disponible">CV</span>' : '');
+
   const statusChip = (s) => `<span class="status s-${CapUI.tone(s)}">${CapUI.esc(CapUI.statusLabel(s))}</span>`;
 
   function followHtml(a) {
@@ -37,7 +39,7 @@
     const { esc } = CapUI;
     return `<tr data-num="${esc(a.num)}">
       <td data-l="N°" class="num">${esc(a.num)}</td>
-      <td data-l="Entreprise" class="cell-co"><button type="button" class="row-open">${esc(a.company)}</button><div class="row-pending">${pendingHtml(pendingFor(state, a.num))}</div></td>
+      <td data-l="Entreprise" class="cell-co"><button type="button" class="row-open">${esc(a.company)}</button>${cvMark(a)}<div class="row-pending">${pendingHtml(pendingFor(state, a.num))}</div></td>
       <td data-l="Poste">${esc(a.role)}</td>
       <td data-l="Note" class="num">${a.score != null ? esc(CapUI.fmtNum(a.score)) : '—'}</td>
       <td data-l="Statut">${statusChip(a.status)}</td>
@@ -50,7 +52,7 @@
     const cols = CapUI.STATUSES.map((s) => [s, list.filter((a) => a.status === s)]).filter(([, l]) => l.length);
     return `<div class="kanban scroll">${cols.map(([s, l]) => `<section class="kcol" aria-label="${esc(CapUI.statusLabel(s))}">
       <h3 class="kcol-head">${statusChip(s)}<span class="count">${esc(l.length)}</span></h3>
-      ${l.map((a) => `<article class="card glass kcard" data-num="${esc(a.num)}"><button type="button" class="row-open">${esc(a.company)}</button>
+      ${l.map((a) => `<article class="card glass kcard" data-num="${esc(a.num)}"><button type="button" class="row-open">${esc(a.company)}</button>${cvMark(a)}
         <p class="kcard-role">${esc(a.role)}</p><p class="kcard-meta">${a.score != null ? `${esc(CapUI.fmtNum(a.score))}/5` : ''}${CapUI.isoDay(a.next_followup) ? ` · relance ${esc(CapUI.fmtDay(a.next_followup))}` : ''}</p>
         <div class="row-pending">${pendingHtml(pendingFor(state, a.num))}</div></article>`).join('')}</section>`).join('')}</div>`;
   }
@@ -81,6 +83,11 @@
   function detailHtml(a, snap) {
     const { esc } = CapUI;
     const href = CapUI.safeHref(a.url);
+    const cv = CapUI.blobHref(a.cv_url);
+    const links = [
+      href ? `<a class="btn btn-soft" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${CapUI.ICON.link}<span>Voir l'offre</span></a>` : '',
+      cv ? `<a class="btn btn-soft cv-link" href="${esc(cv)}" target="_blank" rel="noopener">${CapUI.ICON.doc}<span>Ouvrir le CV (PDF)</span></a>` : '',
+    ].join('');
     const report = (snap.reports || []).find((r) => r && r.num === a.report_num && a.report_num != null);
     const urg = { overdue: 'en retard', urgent: 'urgente', waiting: 'à venir', cold: 'sans réponse' }[a.followup_urgency] || '';
     const opts = CapUI.STATUSES.map((s) => `<option value="${s}"${s === a.status ? ' selected' : ''}>${esc(CapUI.statusLabel(s))} (${s})</option>`).join('');
@@ -90,7 +97,8 @@
         <div><dt>Envoyée le</dt><dd>${esc(CapUI.fmtDay(a.applied_on))}</dd></div>
         <div><dt>Prochaine relance</dt><dd>${esc(CapUI.fmtDay(a.next_followup))}${urg && CapUI.isoDay(a.next_followup) ? ` · ${esc(urg)}` : ''}</dd></div>
         <div><dt>Clôture de l'offre</dt><dd>${esc(CapUI.fmtDay(a.closes_at))}</dd></div></dl>
-      ${href ? `<p><a class="btn btn-soft" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${CapUI.ICON.link}<span>Voir l'offre</span></a></p>` : ''}
+      ${links ? `<div class="detail-links">${links}</div>` : ''}
+      ${cv && a.cv_stale === true ? '<p class="cv-stale small">Ce CV a été modifié depuis son envoi sur le tableau de bord.</p>' : ''}
       <h3 class="sub-title">Historique</h3><ol class="history">${historyHtml(a) || '<li class="muted">Pas encore d\'historique.</li>'}</ol>
       ${report && CapUI.reportHtml ? `<details class="report-box"><summary>Résumé du rapport</summary>${CapUI.reportHtml(report)}</details>` : ''}
       <div id="detail-pending" class="detail-pending"></div>

@@ -2,15 +2,34 @@
 // Read-only CLI: prints {"docs":[...]} (or a per-document summary with --summary). Never writes to disk.
 // --sync-plan --current <file>: <file> is the `db_list snapshot` output; prints {"batches":[[op,…],…]}, the
 // db_write calls of the sync in order (new parts, then the snapshot/meta flip with the old parts' deletes).
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
+import { createHash } from 'node:crypto';
 import { getCareerOpsRoot, resolveTrackerPath, getProfilePath } from '../../path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, extractTrackerReportNumbers } from '../../tracker-parse.mjs';
-import { buildSnapshot } from './lib/snapshot.mjs';
+import { buildSnapshot, parseCvAssets } from './lib/snapshot.mjs';
 import { toDocs, syncPlan } from './lib/chunk.mjs';
 import { parseDbLines } from './lib/db-lines.mjs';
 
 const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '');
+
+// Current sha256 of each CV file recorded in data/dashboard.json that exists under the data root, keyed by the
+// recorded `file`. A path that leaves the data root, or is not a regular file, is not hashed (cv_stale stays null).
+function cvFileHashes(root, dashboardJson) {
+  const out = {};
+  for (const entry of Object.values(parseCvAssets(dashboardJson))) {
+    const file = entry.file;
+    if (typeof file !== 'string' || !file || Object.hasOwn(out, file)) continue;
+    const abs = resolve(root, file);
+    const rel = relative(root, abs);
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) continue;
+    try {
+      if (!statSync(abs).isFile()) continue;
+      out[file] = createHash('sha256').update(readFileSync(abs)).digest('hex');
+    } catch { /* unreadable: unknown */ }
+  }
+  return out;
+}
 
 export function collectInput(now = new Date()) {
   const root = getCareerOpsRoot();
@@ -32,6 +51,7 @@ export function collectInput(now = new Date()) {
         .sort()
         .map((f) => ({ num: parseInt(f, 10), content: read(join(reportsDir, f)) }))
     : [];
+  const dashboardJson = read(join(root, 'data', 'dashboard.json'));
 
   return {
     trackerContent,
@@ -41,6 +61,8 @@ export function collectInput(now = new Date()) {
     scanHistoryContent: read(join(dataDir, 'scan-history.tsv')),
     reports,
     profileYaml: read(getProfilePath(root)),
+    dashboardJson,
+    cvFileHashes: cvFileHashes(root, dashboardJson),
     now,
   };
 }

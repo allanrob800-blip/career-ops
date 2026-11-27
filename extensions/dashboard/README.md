@@ -9,7 +9,7 @@ La page n'écrit jamais dans le tracker. Un changement de statut ou une note sai
 - `page/` : la page publiée (HTML, CSS, scripts classiques).
 - `test/` : les tests, sur des données fictives (`test/fixtures/root`).
 
-Le slug de l'artefact n'est pas dans ce dépôt : il est dans la couche utilisateur, `{DATA_ROOT}/data/dashboard.json` (`{"slug": "…"}`).
+Le slug de l'artefact n'est pas dans ce dépôt : il est dans la couche utilisateur, `{DATA_ROOT}/data/dashboard.json` (`{"slug": "…", "cv_assets": {…}}`, voir « CV des candidatures »).
 
 ## Synchronisation (au début de chaque session)
 
@@ -42,6 +42,20 @@ Si la synchronisation s'arrête en route, la génération précédente reste ent
 
 `node extensions/dashboard/export.mjs` sans option affiche `{"docs": […]}` ; `--summary` donne la taille de chaque document.
 
+## CV des candidatures
+
+Chaque candidature peut ouvrir son CV adapté : la fiche de la candidature (ligne du tableau, ou `CapApp.openApp(num)`) montre un bouton « Ouvrir le CV (PDF) », et la ligne porte une petite marque « CV ». Le PDF est un fichier de l'artefact (un *asset*), servi par la plateforme à `/_blob/<asset_id>` : un simple lien, qui s'ouvre sur ordinateur comme sur iPhone.
+
+Quand Claude a envoyé un nouveau CV adapté pour une candidature :
+
+1. Envoyer le PDF à l'artefact avec l'outil `upload_asset` (slug de `data/dashboard.json`). La page elle-même n'appelle jamais `claude.use("assets")` : seule la déclaration `assets: {}` (voir « Capacités déclarées ») est nécessaire, pour l'outil d'envoi.
+2. Noter le résultat dans `{DATA_ROOT}/data/dashboard.json`, sous `cv_assets["<n° du tracker>"]` :
+   `{"asset_id": "<id renvoyé>", "file": "output/<fichier>.pdf", "sha256": "<empreinte sha256 du PDF envoyé>"}`
+   (`file` est relatif à la racine des données ; `sha256sum output/<fichier>.pdf` donne l'empreinte).
+3. Refaire l'étape 2 de la synchronisation (« Envoyer l'instantané »).
+
+`export.mjs` ne crée un lien que pour un `asset_id` de 8 à 128 caractères `[A-Za-z0-9_-]`, et la page vérifie de nouveau que l'adresse est exactement `/_blob/<id>`. Si le fichier `file` existe et que son empreinte actuelle diffère de `sha256` (le CV a été refait sans être renvoyé), la fiche l'indique : « Ce CV a été modifié depuis son envoi sur le tableau de bord. » Renvoyer alors le PDF et mettre à jour l'entrée. Un `data/dashboard.json` absent ou illisible ne bloque rien : aucune candidature n'a de lien.
+
 ## Publier la page
 
 Depuis les fichiers, avec `publish_files` : chaque fichier de `extensions/dashboard/page/` avec pour `as` son chemin sous `page/` (`index.html`, `css/app.css`, `js/data.js`, `js/screens/accueil.js`, …).
@@ -55,8 +69,11 @@ Avec `read_declaration` puis `declare_capabilities` (la déclaration est complè
 
 ```json
 {"db":{"rules":[{"path":"snapshot","read":"owner","write":"owner"},{"path":"requests","read":"owner","write":"owner"},{"path":"handled","read":"owner","write":"owner"},{"path":"settings","read":"owner","write":"owner"}]},
- "mcp":{"servers":[{"server":"Microsoft 365","tools":["outlook_email_search","outlook_calendar_search"]}]}}
+ "mcp":{"servers":[{"server":"Microsoft 365","tools":["outlook_email_search","outlook_calendar_search"]}]},
+ "assets":{}}
 ```
+
+`assets: {}` est là pour l'outil `upload_asset`, qui envoie les CV (voir « CV des candidatures ») ; la page n'utilise pas cette capacité, elle ne fait que des liens vers `/_blob/<id>`.
 
 Pas de `desktop` (inutilisé) ni de `user` (la page ne l'appelle pas). La page n'utilise que les deux outils de recherche Outlook : elle n'envoie, ne déplace et ne supprime aucun e-mail.
 

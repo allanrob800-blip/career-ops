@@ -401,6 +401,9 @@ table.apps { width: 100%; border-collapse: collapse; }
 .history li { position: relative; display: flex; gap: 12px; padding: 6px 0 6px 16px; }
 .history li::before { content: ''; position: absolute; left: -6px; top: 13px; width: 10px; height: 10px; border-radius: 50%; background: var(--acc); }
 .h-day { font-weight: 700; white-space: nowrap; min-width: 4.5em; }
+.detail-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.cv-stale { margin-top: 8px; color: var(--warn); }
+.cv-mark { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: .72rem; font-weight: 700; letter-spacing: .02em; vertical-align: middle; background: var(--track); color: var(--muted); }
 .detail-pending { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .detail-pending:empty { display: none; }
 .req { display: grid; gap: 8px; margin-top: 18px; }

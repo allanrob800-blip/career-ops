@@ -122,5 +122,8 @@ test('parseDbLines: tool line format, wrapper lines ignored; a JSON array passes
   const text = 'Voici le résultat\n{"collection":"snapshot","count":2}\n{"id":"meta","data":{"a":1},"version":3,"updatedAt":"x"}\nnot json\n{"id":"apps-0","data":{},"version":1}\n';
   assert.deepEqual(parseDbLines(text).map((e) => [e.id, e.version]), [['meta', 3], ['apps-0', 1]]);
   assert.deepEqual(parseDbLines('[{"id":"a","data":{}}]'), [{ id: 'a', data: {} }]);
+  // the tools wrap the lines in an <untrusted-document-…> tag, possibly on the same line; a tooLarge entry has no data
+  const wrapped = '{"count":2,"nextCursor":""}\n<untrusted-document-ab12>{"id":"meta","data":{},"version":2}\n{"id":"apps-g1-0","tooLarge":true,"version":5}</untrusted-document-ab12>\n';
+  assert.deepEqual(parseDbLines(wrapped).map((e) => [e.id, e.version]), [['meta', 2], ['apps-g1-0', 5]]);
   assert.deepEqual(parseDbLines(''), []);
 });

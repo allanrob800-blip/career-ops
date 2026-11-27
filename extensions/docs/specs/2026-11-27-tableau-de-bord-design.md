@@ -79,6 +79,7 @@ Pour la fusion dans son ensemble, le candidat a choisi l'**approche A** : unique
 - Tout ce qui touche à l'e-mail passe par son adresse Outlook personnelle (jamais écrite dans le dépôt).
 - **Pas** d'e-mails envoyés par Claude, même vers sa propre adresse : le tableau de bord remplace les notifications par e-mail.
 - Style et fonctions inspirés de la vidéo de référence (§ 1), transposés à la recherche d'emploi.
+- **Persistance des données :** un dépôt GitHub **privé** séparé contient toute la couche utilisateur (§ 6.1 bis).
 
 ## 6. Conception
 
@@ -140,6 +141,17 @@ Une demande n'est jamais appliquée sans passer par le script. Une demande ambig
 - Il normalise chaque réponse pertinente avec `paste-reply.mjs --file`, ce qui écrit `data/reply-candidates.json`.
 - Il lance le mode `reply-watch`, qui propose les changements de statut que le candidat valide.
 - Raison de ce chemin : le format `data/reply-proposals/` n'accepte que `source.kind = "gmail"` (`lib/reply-proposals.mjs:40`) et le modifier violerait l'approche A.
+
+### 6.1 bis Persistance de la couche utilisateur (choix du candidat)
+
+Les sessions cloud repartent d'un conteneur vide. La couche utilisateur vit donc dans un **dépôt GitHub privé** séparé, créé par le candidat (nom suggéré : `career-data`).
+
+- **Contenu du dépôt privé :** `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `portals.yml`, `data/`, `reports/`, `jds/`, `interview-prep/`, `output/` et le reste de la couche utilisateur de `DATA_CONTRACT.md`.
+- **Liaison au code :** career-ops la gère nativement par le fichier marqueur `.career-ops-data` (ignoré par git, à recréer dans chaque conteneur) ou par `CAREER_OPS_DATA_DIR` (DATA_CONTRACT.md → « Custom Data Directory »). Clone conseillé : `../career-data` à côté du dépôt de code ; marqueur `../career-data`.
+- **Début de session :** ajouter le dépôt privé à la session (`add_repo`), le cloner, écrire le marqueur, vérifier avec `node doctor.mjs --json` que `data_root` pointe bien dessus.
+- **Fin de session :** commit et push du dépôt privé après tout changement de la couche utilisateur.
+- **Automatisation possible plus tard :** un script d'initialisation de l'environnement cloud. Hors périmètre de ce document.
+- **Garde-fou :** avant chaque commit du dépôt de code (public), vérifier qu'aucun fichier de la couche utilisateur n'y est suivi. Ils sont normalement déjà ignorés par `.gitignore`.
 
 ### 6.2 Sécurité de la base
 
@@ -203,7 +215,7 @@ Navigation : menu latéral sur PC ; barre d'onglets en bas sur iPhone (5 onglets
 - **Objectif hebdomadaire :** il appartient à la page (document `settings/prefs` dans la base). `export.mjs` ne l'écrit jamais, donc une synchronisation ne l'écrase pas. Compte : les passages au statut `Applied` dans la semaine ISO en cours (du lundi au dimanche, heure de Paris), lus dans `data/status-log.tsv`. Si ce fichier est absent, on compte les lignes `Applied` dont la date tombe dans la semaine. L'instantané transporte donc les dates de passage à `Applied`.
 - **Lien vers le rapport :** l'instantané contient pour chaque rapport un résumé court, sans le texte intégral : note, archétype, légitimité, 2 à 3 points forts et 2 à 3 lacunes repris des en-têtes et blocs du rapport. La page l'affiche dans un panneau.
 - **Date d'une demande faite depuis la page :** elle est appliquée avec `set-status.mjs --on <date de created_at>`, pour que l'historique, la cadence des relances et l'objectif hebdomadaire reflètent le jour où le candidat a agi.
-- **Déclenchement de la synchronisation :** une règle dans `modes/_custom.md` (couche utilisateur) demande à Claude, au début de chaque session career-ops, de traiter les demandes `pending`, puis de régénérer et d'écrire l'instantané.
+- **Déclenchement de la synchronisation :** une règle dans `modes/_custom.md` (couche utilisateur, donc conservée dans le dépôt privé) demande à Claude, au début de chaque session career-ops, de traiter les demandes `pending`, puis de régénérer et d'écrire l'instantané.
 
 ### 6.7 Tests et vérification
 

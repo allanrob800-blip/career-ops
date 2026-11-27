@@ -162,7 +162,17 @@
   document.addEventListener('keydown', (e) => {
     if (sheet.hidden) return;
     if (e.key === 'Escape') closeSheet(true);
-    else if (e.key === 'Tab') CapUI.trapTab(sheet, e); // aria-modal sheet: focus stays on its three links
+    // aria-modal sheet: focus stays on its three links, but only while it is rendered (never trap an invisible box)
+    else if (e.key === 'Tab' && sheet.getClientRects().length) CapUI.trapTab(sheet, e);
+  });
+  // From 900px the side menu holds every page and the sheet is not rendered (e.g. an iPad turning to landscape):
+  // close it, and if the focus was inside, give it to the current page in the side menu.
+  const desktop = globalThis.matchMedia ? matchMedia('(min-width: 900px)') : null;
+  if (desktop) desktop.addEventListener('change', (e) => {
+    if (!e.matches || sheet.hidden) return;
+    const inside = sheet.contains(document.activeElement);
+    closeSheet(false);
+    if (inside) { const to = $('#nav .nav-item[aria-current=page]') || $('#nav-search'); if (to) to.focus(); }
   });
   window.addEventListener('hashchange', render);
 

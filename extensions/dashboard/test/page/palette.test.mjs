@@ -478,3 +478,26 @@ test('« Plus » sheet: modal dialog, Tab stays inside, Escape closes and return
     assert.deepEqual(p.errors, []);
   } finally { await p.close(); }
 });
+
+test('« Plus » sheet closes when the layout switches to desktop; Tab then reaches a visible control', async () => {
+  const p = await open({ device: { width: 800, height: 900 } });
+  try {
+    await go(p, 'accueil');
+    const sheet = p.page.locator('#more-sheet');
+    await p.page.locator('#more-btn').click();
+    await sheet.waitFor();
+    await p.page.setViewportSize({ width: 1200, height: 900 }); // e.g. an iPad rotating to landscape
+    await p.page.waitForFunction(() => document.getElementById('more-sheet').hidden === true);
+    assert.equal(await p.page.locator('#more-btn').getAttribute('aria-expanded'), 'false');
+    for (let i = 0; i < 4; i++) {
+      await p.page.keyboard.press('Tab');
+      const f = await p.page.evaluate(() => {
+        const a = document.activeElement;
+        return { tag: a.tagName, visible: !!a.getClientRects().length && getComputedStyle(a).visibility !== 'hidden' };
+      });
+      assert.notEqual(f.tag, 'BODY', `Tab ${i} left the focus on BODY`);
+      assert.ok(f.visible, `Tab ${i} focused an invisible element`);
+    }
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});

@@ -242,3 +242,34 @@ test('CLI with a dossier prepared today (Paris) counts it against --max', () => 
   assert.deepEqual(JSON.parse(run(['--max', '1'], root)).candidates, []);
   assert.deepEqual(JSON.parse(run(['--max', '2'], root)).candidates.map(pick), [1]);
 }));
+
+// ---- final wave F4 (ruling R15): an aggregator listing is unconfirmed at the employer, never prepared ----
+test('selectForPrep skips a row whose URL is an aggregator listing (unconfirmed at employer)', () => {
+  const rows = [row(1, { url: 'https://www.linkedin.com/jobs/view/4000000001' }), row(2), row(3, { url: null })];
+  const r = selectForPrep({ rows, legitimacyByReport: new Map(), store: store(), max: 10 });
+  assert.deepEqual(r.candidates.map(pick), [2, 3]);
+  assert.deepEqual(r.skipped, [{ num: 1, reason: 'unconfirmed at employer' }]);
+});
+
+test('CLI skips a row whose report URL is an aggregator listing', () => withRoot((root) => {
+  edit(join(root, 'reports', '001-altair-conseil.md'), '**URL:** https://jobs.altair-conseil.example/offres/chef-de-projet-data', '**URL:** https://www.linkedin.com/jobs/view/4000000001');
+  const out = JSON.parse(run([], root));
+  assert.deepEqual(out.skipped.find((s) => s.num === 1), { num: 1, reason: 'unconfirmed at employer' });
+  assert.deepEqual(out.candidates, []);
+}));
+
+test('CLI prefers the report URL: an employer report URL beats an aggregator tracker URL', () => withRoot((root) => {
+  const file = join(root, 'data', 'applications.md');
+  const lines = readFileSync(file, 'utf8').split('\n').map((l) => {
+    if (l.startsWith('| # |')) return `${l} URL |`;
+    if (l.startsWith('|---')) return `${l}-----|`;
+    if (l.startsWith('| 1 |')) return `${l} https://www.linkedin.com/jobs/view/4000000001 |`;
+    if (l.startsWith('| ')) return `${l}  |`;
+    return l;
+  });
+  writeFileSync(file, lines.join('\n'));
+  const out = JSON.parse(run([], root));
+  const c1 = out.candidates.find((c) => c.num === 1);
+  assert.ok(c1, JSON.stringify(out));
+  assert.equal(c1.url, 'https://jobs.altair-conseil.example/offres/chef-de-projet-data');
+}));

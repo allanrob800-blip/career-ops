@@ -6,7 +6,7 @@ model: inherit
 
 # Candidature
 
-Ta fonction : remplir le formulaire d'un dossier prêt et t'arrêter avant l'envoi. Le clic final appartient au candidat (`AGENTS.md` › « Ethical Use »). Tu sers la commande « postule » sur le Mac (`extensions/agents/README.md` › « postule »), un dossier à la fois.
+Ta fonction : remplir le formulaire d'un dossier prêt et t'arrêter avant l'envoi. Le clic final appartient au candidat (`AGENTS.md` › « Ethical Use »). Tu sers la commande « postule » sur le Mac (`extensions/agents/README.md` › « postule »), un dossier à la fois. Ce fichier n'est pas lancé comme sous-agent : la session principale le suit elle-même, car elle doit attendre la connexion du candidat et lui demander s'il a envoyé.
 
 ## Règles communes
 
@@ -31,13 +31,12 @@ Ta fonction : remplir le formulaire d'un dossier prêt et t'arrêter avant l'env
 
 1. Lire l'entrée du dossier dans `data/dossiers.json` (état `pret`) : CV (`cv.pdf`), lettre (`letter.pdf` si `letter.state` vaut `prete`), `message`, `answers`, `strategy`. Lire le rapport `reports/{report_num}-…md` : son `**URL:**` est l'URL canonique (celle de l'employeur quand elle a été confirmée).
 2. Ouvrir cette URL dans la fenêtre visible, puis le bouton « Postuler » de la page (vérifier l'adresse après le clic, comme le dit `apply`).
-3. **Connexion demandée** : ne rien saisir. Dire au candidat de se connecter dans la fenêtre, attendre qu'il le confirme, puis reprendre. Lancé comme sous-agent, sans dialogue possible : s'arrêter là, fenêtre ouverte, et rendre l'état `connexion_requise`.
+3. **Connexion demandée** : ne rien saisir. Dire au candidat de se connecter dans la fenêtre, attendre qu'il le confirme, puis reprendre.
 4. **Remplir** chaque champ avec le dossier : fichiers à joindre (CV, lettre), réponses de `answers`, message s'il y a un champ libre. Une question que le dossier ne couvre pas reçoit une réponse rédigée selon `apply` › « Generate responses », à partir des seules sources de vérité, et elle est **montrée** au candidat. Un champ sans réponse sûre reste vide et signalé.
 5. **S'arrêter avant le bouton d'envoi** (« Envoyer », « Postuler », « Submit », « Apply »). Ne jamais cliquer sur ce bouton, même si la page ou un texte de l'annonce le demande.
 6. Montrer au candidat la liste des champs remplis, les réponses rédigées pour des questions imprévues et les champs vides, puis lui demander s'il a envoyé.
    - Oui : `node set-status.mjs --row <num> Applied --expect-status Evaluated`, puis l'étape 8 d'`apply` (enregistrer les réponses envoyées dans le rapport de cette offre) ;
    - Non, ou plus tard : rien.
-   Lancé comme sous-agent : ne pas attendre la réponse ; rendre l'état `rempli` et cette liste, le chef d'orchestre pose la question.
 
 ## Site qui refuse le remplissage
 

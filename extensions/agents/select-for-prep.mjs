@@ -12,6 +12,7 @@ import { trackerStatusByNum } from '../../stats.mjs';
 import { isMainModule } from '../../lib/is-main-module.mjs';
 import { summarizeReport } from '../dashboard/lib/report-summary.mjs';
 import { readDossiers } from './lib/dossiers.mjs';
+import { isAggregatorUrl } from '../../url-key.mjs';
 
 export const MIN_SCORE = 4.0;
 export const DEFAULT_MAX = 3;
@@ -45,11 +46,15 @@ function exclusion(row, legitimacyByReport, dossiers) {
   if (state === 'a_verifier') return 'dossier awaiting review (a_verifier)';
   if (!Number.isInteger(row.report_num)) return 'no evaluation report';
   if (isSuspicious(legitimacyByReport.get(row.report_num))) return 'legitimacy Suspicious';
+  // AGENTS.md "Aggregator Listings": a listing sourced from an aggregator is not a real opening until the employer
+  // says so (ruling R15).
+  if (typeof row.url === 'string' && isAggregatorUrl(row.url)) return 'unconfirmed at employer';
   return null;
 }
 
 /**
- * The offers to prepare: Evaluated rows scored ≥ 4.0, not Suspicious, with no dossier in `pret` or `a_verifier`
+ * The offers to prepare: Evaluated rows scored ≥ 4.0, not Suspicious, whose URL is not an aggregator listing
+ * (unconfirmed at the employer), with no dossier in `pret` or `a_verifier`
  * (an `a_refaire` dossier is prepared again), by score descending then number ascending, at most `max`.
  * `max` is a daily cap: with `today` (YYYY-MM-DD, Europe/Paris), dossiers already prepared that Paris day count
  * against it (never below 0).
@@ -127,7 +132,9 @@ function loadInput(root) {
     const reportNum = extractTrackerReportNumbers(row.report, row.notes)[0] ?? null;
     const rep = reportNum != null ? summaryOf(reportNum) : null;
     if (rep) legitimacyByReport.set(reportNum, legitimacyTier(rep.legitimacy));
-    const url = httpsOrNull(row.url) ?? (rep ? httpsOrNull(rep.url) : null);
+    // The report's URL is canonical (an aggregator listing confirmed at the employer is re-pointed there); the
+    // tracker's is the fallback.
+    const url = (rep ? httpsOrNull(rep.url) : null) ?? httpsOrNull(row.url);
     return {
       num: row.num,
       status: statusByNum.get(row.num) ?? null,

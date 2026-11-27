@@ -166,7 +166,7 @@ CV : `asset_id`, `file`, `sha256`, `pages` ; lettre : `letter_asset_id`, `letter
 
 | Commande | Rôle |
 |---|---|
-| `node extensions/agents/select-for-prep.mjs --max 3` | Offres à préparer aujourd'hui : `{candidates: [{num, report_num, company, role, score, url}], skipped: [{num, reason}]}`. `Evaluated`, note de 4,0 ou plus, légitimité autre que `Suspicious`, sans dossier `pret` ni `a_verifier` ; les dossiers préparés ce jour (heure de Paris) comptent dans le plafond. Lecture seule. |
+| `node extensions/agents/select-for-prep.mjs --max 3` | Offres à préparer aujourd'hui : `{candidates: [{num, report_num, company, role, score, url}], skipped: [{num, reason}]}`. `Evaluated`, note de 4,0 ou plus, légitimité autre que `Suspicious`, URL (celle du rapport d'abord, sinon celle du tracker) qui n'est pas une annonce d'agrégateur (sinon `unconfirmed at employer`), sans dossier `pret` ni `a_verifier` ; les dossiers préparés ce jour (heure de Paris) comptent dans le plafond. Lecture seule. |
 | `node extensions/agents/select-for-prep.mjs --letters` | `{letters: [num…]}` : dossiers dont la lettre est `a_completer` et `why` rempli. |
 | `node extensions/agents/check-strategy.mjs --sheet <fiche.json> --cv-html <cv.html>` | `{ok, reasons}` ; code 1 si `ok` est faux. Chemins relatifs : depuis la racine des données. |
 | `node extensions/agents/render-pages.mjs --pdf <fichier.pdf> --out <dossier>` | Une image PNG par page (A4, 150 dpi) : `{pages: […]}`. |

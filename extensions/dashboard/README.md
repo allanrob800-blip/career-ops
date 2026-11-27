@@ -41,7 +41,7 @@ Claude fait les deux étapes dans cet ordre. Un seul `db_write` à la fois, et 2
    - puis un lot qui bascule `snapshot/meta` (`set` avec `ifVersion`) et supprime les anciennes parties (`delete` avec `ifVersion`) ;
    - les suppressions en trop éventuelles suivent, après la bascule.
 
-Outre le tracker et ses fichiers voisins, `export.mjs` lit sous la racine des données `data/dossiers.json` (le dossier de chaque candidature préparée, avec sa fiche stratégie `output/…-strategie.json`, lue seulement si elle est un fichier de la racine des données), `data/proposals.json` (statuts proposés par l'agent Suivi, partie `snapshot/proposals-…`) et `data/relances.json` (texte de relance, champ `text` de `followups_due`). Un fichier absent ne donne rien ; un fichier illisible est signalé sur la sortie d'erreur et ignoré, sans bloquer l'instantané.
+Outre le tracker et ses fichiers voisins, `export.mjs` lit sous la racine des données `data/dossiers.json` (le dossier de chaque candidature préparée, avec sa fiche stratégie `output/…-strategie.json`, lue seulement si elle est un fichier de la racine des données), `data/proposals.json` (statuts proposés par l'agent Suivi, partie `snapshot/proposals-…`) et `data/relances.json` (texte de relance, champ `text` de `followups_due`). Un fichier absent ne donne rien ; un fichier illisible est signalé sur la sortie d'erreur et ignoré, sans bloquer l'instantané. Si les textes de relance font dépasser `snapshot/meta` la taille d'un document, les plus longs sont retirés de l'instantané, avec un avertissement, jusqu'à ce qu'il tienne : la relance reste listée, sans texte à copier.
 
 Si la synchronisation s'arrête en route, la génération précédente reste entière dans la base, et la page continue de l'afficher. Si la base ne contient qu'une `snapshot/meta` dont les parties manquent, la page l'indique (« Synchronisation incomplète — les données seront rétablies à la prochaine session ») : refaire l'étape 2.
 
@@ -78,8 +78,11 @@ Avec `read_declaration` puis `declare_capabilities` (la déclaration est complè
 ```json
 {"db":{"rules":[{"path":"snapshot","read":"owner","write":"owner"},{"path":"requests","read":"owner","write":"owner"},{"path":"handled","read":"owner","write":"owner"},{"path":"settings","read":"owner","write":"owner"}]},
  "mcp":{"servers":[{"server":"Microsoft 365","tools":["outlook_email_search","outlook_calendar_search"]}]},
- "assets":{}}
+ "assets":{},
+ "downloads":true}
 ```
+
+`downloads: true` sert aux boutons de téléchargement de l'espace CV (« Télécharger le CV (PDF) », « Télécharger la lettre (PDF) ») ; sans lui, la page les masque. La page existante gagne cette capacité : déclarer d'abord, puis publier le code qui l'utilise.
 
 `assets: {}` est là pour l'outil `upload_asset`, qui envoie les pages des CV (voir « CV des candidatures ») ; la page n'utilise pas cette capacité, elle affiche seulement des images `/_blob/<id>`.
 

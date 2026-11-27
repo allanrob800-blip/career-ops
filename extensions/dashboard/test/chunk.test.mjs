@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toDocs, genId, syncPlan, fitsInPart } from '../lib/chunk.mjs';
+import { toDocs, genId, syncPlan, fitsInPart, metaFits } from '../lib/chunk.mjs';
 import { parseDbLines } from '../lib/db-lines.mjs';
 
 const size = (d) => Buffer.byteLength(JSON.stringify(d));
@@ -162,4 +162,15 @@ test('fitsInPart: true exactly for the items toDocs accepts alone in a part', ()
   assert.throws(() => toDocs(s, 1000), /maxBytes/);
   assert.equal(fitsInPart(item(59000), gen), true);
   assert.equal(fitsInPart(item(60000), gen), false);
+});
+
+test('metaFits agrees with the toDocs meta check', () => {
+  const snap = fakeSnapshot({ apps: 3 });
+  assert.equal(metaFits(snap), true);
+  snap.followups_due = Array.from({ length: 30 }, (_, i) => ({ num: i, text: 'é'.repeat(1500) }));
+  assert.equal(metaFits(snap), false);
+  assert.throws(() => toDocs(snap), /snapshot\/meta is \d+ bytes/);
+  snap.followups_due = snap.followups_due.slice(0, 5);
+  assert.equal(metaFits(snap), true);
+  assert.doesNotThrow(() => toDocs(snap));
 });

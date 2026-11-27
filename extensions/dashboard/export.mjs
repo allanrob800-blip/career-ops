@@ -10,7 +10,7 @@ import { resolveColumns, parseTrackerRow, extractTrackerReportNumbers } from '..
 import { buildSnapshot, parseCvAssets } from './lib/snapshot.mjs';
 import { readDossiers, validateDossier } from '../agents/lib/dossiers.mjs';
 import { validateProposals, validateRelances } from '../agents/lib/suivi-files.mjs';
-import { toDocs, syncPlan, fitsInPart } from './lib/chunk.mjs';
+import { toDocs, syncPlan, fitsInPart, metaFits } from './lib/chunk.mjs';
 import { parseDbLines } from './lib/db-lines.mjs';
 
 const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '');
@@ -124,6 +124,21 @@ function fitApps(snapshot) {
   return snapshot;
 }
 
+// Same guard for snapshot/meta: the follow-up texts (up to 1500 characters each) are the part of it that grows
+// with the data. While meta is over the limit, the largest text left is dropped, with a warning; the follow-up
+// itself stays listed. Runs after fitApps, since the parts meta lists depend on the apps.
+function fitMeta(snapshot) {
+  const withText = (snapshot.followups_due ?? [])
+    .filter((f) => typeof f.text === 'string')
+    .sort((a, b) => Buffer.byteLength(JSON.stringify(b.text)) - Buffer.byteLength(JSON.stringify(a.text)) || a.num - b.num);
+  for (const f of withText) {
+    if (metaFits(snapshot)) break;
+    delete f.text;
+    warn(`follow-up ${f.num}: text left out of the snapshot (snapshot/meta too large)`);
+  }
+  return snapshot;
+}
+
 const argv = process.argv.slice(2);
 let current = null;
 if (argv.includes('--sync-plan')) {
@@ -137,7 +152,7 @@ if (argv.includes('--sync-plan')) {
     process.exit(1);
   }
 }
-const docs = toDocs(fitApps(buildSnapshot(collectInput())));
+const docs = toDocs(fitMeta(fitApps(buildSnapshot(collectInput()))));
 if (current) {
   process.stdout.write(JSON.stringify(syncPlan(docs, current)));
 } else if (argv.includes('--summary')) {

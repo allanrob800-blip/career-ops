@@ -46,12 +46,22 @@ function chunkArray(name, items, generation, maxBytes) {
   return docs;
 }
 
-export function toDocs(snapshot, maxBytes = MAX_BYTES) {
+function split(snapshot, maxBytes) {
   const parts = [];
   for (const name of ARRAYS) parts.push(...chunkArray(name, snapshot[name] ?? [], snapshot.generation, maxBytes));
   const meta = {};
   for (const k of META_KEYS) meta[k] = snapshot[k];
   meta.parts = parts.map((d) => d.path);
+  return { meta, parts };
+}
+
+/** true when the snapshot/meta document of `snapshot` fits under maxBytes (what toDocs checks last). */
+export function metaFits(snapshot, maxBytes = MAX_BYTES) {
+  return bytes(split(snapshot, maxBytes).meta) <= maxBytes;
+}
+
+export function toDocs(snapshot, maxBytes = MAX_BYTES) {
+  const { meta, parts } = split(snapshot, maxBytes);
   if (bytes(meta) > maxBytes) throw new Error(`snapshot/meta is ${bytes(meta)} bytes, over maxBytes (${maxBytes})`);
   return [{ path: META, data: meta }, ...parts];
 }

@@ -278,3 +278,21 @@ test('export CLI (R9): an app item still too large for a part loses its dossier 
   assert.equal(r.apps[6].dossier.state, 'a_verifier');
   assert.equal(Object.keys(r.apps).length, 8);
 }));
+
+// ---- final wave F3: follow-up texts must not push snapshot/meta over the part limit ----
+test('export CLI (F3): 40 due follow-ups of 1500 accented characters drop their texts until meta fits, with a warning', () => withRoot((root) => {
+  const tracker = join(root, 'data/applications.md');
+  const rows = Array.from({ length: 40 }, (_, i) => `| ${100 + i} | 2026-10-01 | Relance ${i} | Poste ${i} | 4.0/5 | Applied | ❌ | — | Fictional fixture |`);
+  writeFileSync(tracker, `${readFileSync(tracker, 'utf8').trimEnd()}\n${rows.join('\n')}\n`);
+  const items = {};
+  for (let i = 0; i < 40; i++) items[String(100 + i)] = { text: 'é'.repeat(1500), generated_at: '2026-11-27T07:00:00Z' };
+  writeJson(root, 'data/relances.json', { schema: 1, items });
+  const r = exportAt(root);
+  const metaBytes = Buffer.byteLength(JSON.stringify(r.meta));
+  assert.ok(metaBytes <= 60000, `${metaBytes} bytes`);
+  assert.match(r.stderr, /follow-up 1\d\d: text left out of the snapshot/);
+  const due = r.meta.followups_due.filter((f) => f.num >= 100);
+  assert.equal(due.length, 40, 'every due follow-up is still listed');
+  assert.ok(due.some((f) => typeof f.text === 'string'), 'texts that fit are kept');
+  assert.ok(due.some((f) => f.text === undefined), 'some texts were dropped');
+}));

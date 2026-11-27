@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "dossiers": {
+    "1": {
+      "state": "a_refaire",
+      "prepared_at": "2026-11-25T07:52:00Z",
+      "report_num": 1,
+      "cv": { "pdf": "output/001-altair-conseil-cv.pdf", "html": "output/001-altair-conseil-cv.html" },
+      "letter": { "state": "a_completer", "why": null, "why_at": null, "pdf": null },
+      "message": "Bonjour, je vous propose ma candidature au poste de chef de projet data.",
+      "answers": [ { "q": "Disponibilité ?", "a": "Sous un mois." } ],
+      "strategy": "output/001-altair-conseil-strategie.json",
+      "check": { "ok": true, "reasons": [] },
+      "retouches": [ { "text": "Mettre en avant la conduite du changement.", "at": "2026-11-26T18:10:00Z", "done_at": null } ]
+    },
+    "3": {
+      "state": "pret",
+      "prepared_at": "2026-11-26T07:55:00Z",
+      "report_num": 3,
+      "cv": { "pdf": "output/003-cedre-energie-cv.pdf", "html": "output/003-cedre-energie-cv.html" },
+      "letter": { "state": "a_completer", "why": "Leur projet de réseau de chaleur rejoint ce que je veux construire.", "why_at": "2026-11-26T20:00:00Z", "pdf": null },
+      "message": "Bonjour, je vous propose ma candidature au poste de responsable produit.",
+      "answers": [],
+      "strategy": "output/003-cedre-energie-strategie.json",
+      "check": { "ok": true, "reasons": [] },
+      "retouches": []
+    }
+  }
+}

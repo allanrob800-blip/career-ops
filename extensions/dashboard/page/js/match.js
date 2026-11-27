@@ -4,10 +4,17 @@
   var LEGAL = ['sas', 'sasu', 'sa', 'sarl', 'inc', 'ltd', 'llc', 'gmbh', 'bv', 'ag', 'plc', 'corp', 'corporation', 'group', 'groupe'];
   var ATS_HOSTS = ['greenhouse.io', 'lever.co', 'ashbyhq.com', 'workable.com', 'smartrecruiters.com', 'myworkdayjobs.com',
     'welcometothejungle.com', 'teamtailor.com', 'recruitee.com', 'personio.de', 'personio.com', 'linkedin.com', 'indeed.com', 'indeed.fr'];
+  // Job boards and recruiting platforms: a sender domain there is a whole board's mail, never one employer.
+  var JOB_BOARDS = ['apec.fr', 'hellowork.com', 'francetravail.fr', 'pole-emploi.fr', 'jobteaser.com', 'welcomekit.co', 'cadremploi.fr',
+    'meteojob.com', 'monster.fr', 'glassdoor.fr', 'glassdoor.com', 'jobvite.com', 'icims.com', 'taleo.net', 'successfactors.com',
+    'successfactors.eu', 'myworkdayjobs.com', 'workday.com', 'werecruit.io', 'njoyn.com', 'talent-soft.com', 'teamtailor.com',
+    'recruitee.com', 'taleez.com', 'flatchr.io', 'digitalrecruiters.com'];
   var SECOND_LEVEL = ['co', 'com', 'org', 'net', 'gouv', 'ac'];
   var JOB_WORDS = ['candidature', 'entretien', 'recrutement', 'recruteur', 'poste', "offre d'emploi", 'interview',
     'application', 'hiring', 'recruiter', 'assessment', 'test technique'];
-  var EVENT_WORDS = ['entretien', 'interview', 'call', 'visio', 'echange', 'rencontre'];
+  var EVENT_WORDS = ['entretien', 'interview', 'visio', 'echange', 'rencontre'];
+  // Phrases that contain a keyword but are not about a job (removed before the keywords are looked for).
+  var NOT_JOB = ['la poste'];
 
   function plain(s) {
     return String(s == null ? '' : s)
@@ -45,7 +52,12 @@
     }
     if (!host || host.indexOf('.') === -1 || /[^a-z0-9.-]/.test(host)) return [];
     var dom = registrable(host);
-    return ATS_HOSTS.indexOf(dom) !== -1 ? [] : [dom];
+    return isJobBoardDomain(dom) ? [] : [dom];
+  }
+
+  function isJobBoardDomain(dom) {
+    var d = String(dom || '').toLowerCase();
+    return ATS_HOSTS.indexOf(d) !== -1 || JOB_BOARDS.indexOf(d) !== -1;
   }
 
   function senderDomain(sender) {
@@ -86,15 +98,25 @@
     return null;
   }
 
+  // Keywords are whole words (or whole phrases) of the normalized text: « applications » or « posted » are no hit.
+  function words(s) {
+    var t = ' ' + plain(s) + ' ';
+    NOT_JOB.forEach(function (p) { t = t.split(' ' + p + ' ').join(' '); });
+    return t.trim();
+  }
+
   function isJobRelated(fields) {
     fields = fields || {};
-    var hay = ' ' + plain(fields.subject) + ' | ' + plain(fields.text) + ' ';
-    return JOB_WORDS.some(function (w) { return hay.indexOf(plain(w)) !== -1; });
+    var texts = [words(fields.subject), words(fields.text)];
+    return JOB_WORDS.some(function (w) {
+      var k = plain(w);
+      return texts.some(function (t) { return hasWord(t, k); });
+    });
   }
 
   function isInterviewEvent(fields, companies) {
     if (matchCompany(fields, companies) !== null) return true;
-    var title = plain((fields || {}).subject);
+    var title = words((fields || {}).subject);
     return EVENT_WORDS.some(function (w) { return hasWord(title, w); });
   }
 
@@ -103,6 +125,7 @@
     domainsFromUrl: domainsFromUrl,
     matchCompany: matchCompany,
     isJobRelated: isJobRelated,
+    isJobBoardDomain: isJobBoardDomain,
     isInterviewEvent: isInterviewEvent
   };
 })();

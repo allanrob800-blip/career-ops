@@ -31,3 +31,28 @@ test('isJobRelated and isInterviewEvent', () => {
   assert.equal(M.isJobRelated({ subject: 'Black Friday -50 %' }), false);
   assert.equal(M.isInterviewEvent({ subject: 'Échange avec Marie' }, []), true);
 });
+
+test('domainsFromUrl drops the extended job-board list', () => {
+  for (const u of ['https://www.apec.fr/x', 'https://www.hellowork.com/x', 'https://candidat.francetravail.fr/x', 'https://x.wd3.myworkdayjobs.com/y',
+    'https://career5.successfactors.eu/x', 'https://jobs.welcomekit.co/x', 'https://acme.teamtailor.com/jobs/1', 'https://acme.taleez.com/x']) {
+    assert.deepEqual([...M.domainsFromUrl(u)], [], u);
+  }
+  assert.equal(M.isJobBoardDomain('apec.fr'), true);
+  assert.equal(M.isJobBoardDomain('acme.fr'), false);
+});
+
+test('keywords match whole words only; « call » is not an interview word', () => {
+  assert.equal(M.isJobRelated({ subject: 'La Poste : votre colis arrive' }), false); // the postal service, not a job
+  assert.equal(M.isJobRelated({ subject: 'Un poste de chef de projet' }), true);
+  assert.equal(M.isJobRelated({ subject: 'New applications for your app store listing' }), false);
+  assert.equal(M.isJobRelated({ subject: 'Posted: weekly digest' }), false);
+  assert.equal(M.isJobRelated({ subject: 'Re: your application' }), true);
+  assert.equal(M.isJobRelated({ subject: 'Invitation à un entretien' }), true);
+  assert.equal(M.isJobRelated({ text: "Nouvelle offre d'emploi chez Acme" }), true);
+  assert.equal(M.isJobRelated({ subject: 'Votre test technique' }), true);
+  assert.equal(M.isInterviewEvent({ subject: 'Call with the bank' }, []), false);
+  assert.equal(M.isInterviewEvent({ subject: 'Recall: dentist' }, []), false);
+  assert.equal(M.isInterviewEvent({ subject: 'Interviewing tips webinar' }, []), false);
+  assert.equal(M.isInterviewEvent({ subject: 'Entretien téléphonique' }, []), true);
+  assert.equal(M.isInterviewEvent({ subject: 'Visio avec Marie' }, []), true);
+});

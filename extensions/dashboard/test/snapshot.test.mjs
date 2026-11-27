@@ -66,3 +66,51 @@ test('rows with a non-canonical status are dropped', () => {
   assert.equal(s.apps.length, 8);
   assert.ok(s.apps.every((a) => STATES.includes(a.status)));
 });
+
+// ---- I4: domain watches never target a job board ----
+const TRACKER_URL = (rows) => `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+${rows.map((r, i) => `| ${i + 1} | 2026-11-20 | ${r[0]} | Role | 4.0/5 | Applied | ❌ | — | Fictional | ${r[1]} |`).join('\n')}
+`;
+
+test('company domains: aggregators, the extended job-board list and shared domains are dropped', () => {
+  const input = { trackerContent: TRACKER_URL([
+    ['Hotel Exemple', 'https://www.apec.fr/candidat/offre/123'],
+    ['Iris Exemple', 'https://iris.wd3.myworkdayjobs.com/fr/job/42'],
+    ['Juno Exemple', 'https://jobs.welcomekit.co/juno/x'],
+    ['Kilo Exemple', 'https://www.simplyhired.com/job/abc'],
+    ['Lima Exemple', 'https://www.glassdoor.fr/job-listing/x'],
+    ['Mike Exemple', 'https://careers.groupe-commun.test/offre/1'],
+    ['November Exemple', 'https://jobs.groupe-commun.test/offre/2'],
+    ['Oscar Exemple', 'https://careers.oscar-exemple.test/role/7'],
+  ]), statusLogContent: '', followupsContent: '', pipelineContent: '', reports: [], profileYaml: '', now: NOW };
+  const s = buildSnapshot(input);
+  const doms = Object.fromEntries(s.companies.map((c) => [c.name, c.domains]));
+  assert.deepEqual(doms['Hotel Exemple'], []);
+  assert.deepEqual(doms['Iris Exemple'], []);
+  assert.deepEqual(doms['Juno Exemple'], []);
+  assert.deepEqual(doms['Kilo Exemple'], []); // career-ops' own aggregator list (url-key.mjs)
+  assert.deepEqual(doms['Lima Exemple'], []);
+  assert.deepEqual(doms['Mike Exemple'], []); // one domain for two companies: neither gets it
+  assert.deepEqual(doms['November Exemple'], []);
+  assert.deepEqual(doms['Oscar Exemple'], ['oscar-exemple.test']);
+});
+
+test('the fixture keeps its own employer domain', () => {
+  const s = buildSnapshot(loadFixtureInput(NOW));
+  assert.deepEqual(s.companies.find((c) => c.norm === 'acme').domains, ['acme.fr']);
+});
+
+// ---- M1: a report linked only from Notes still attaches to its row ----
+test('a report linked only from the Notes cell attaches to its row', () => {
+  const input = loadFixtureInput(NOW);
+  input.trackerContent = input.trackerContent.replace(
+    '| 1 | 2026-11-20 | Acme | Product Manager | 4.2/5 | Evaluated | ✅ | [1](reports/001-acme-pm.md) | Fictional fixture |',
+    '| 1 | 2026-11-20 | Acme | Product Manager | 4.2/5 | Evaluated | ✅ | — | Fictional fixture, see [1](reports/001-acme-pm.md) |');
+  assert.match(input.trackerContent, /see \[1\]/);
+  const a = buildSnapshot(input).apps.find((x) => x.num === 1);
+  assert.equal(a.report_num, 1);
+  assert.equal(a.url, 'https://jobs.acme.fr/offres/product-manager-42');
+});

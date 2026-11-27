@@ -10,6 +10,7 @@ import {
 import { resolveColumns, parseTrackerRow, extractTrackerReportNumbers } from '../../../tracker-parse.mjs';
 import { closeDatesByUrl, closeDateForUrl } from '../../../lib/posting-close.mjs';
 import { loadYaml } from '../../../lib/yaml-document.mjs';
+import { isAggregatorUrl } from '../../../url-key.mjs';
 import { summarizeReport } from './report-summary.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -123,7 +124,7 @@ export function buildSnapshot(input) {
 
   const apps = rows.filter((row) => CANONICAL.has(statusByNum.get(row.num))).map((row) => {
     const status = statusByNum.get(row.num);
-    const reportNum = extractTrackerReportNumbers(row.report, '')[0] ?? null;
+    const reportNum = extractTrackerReportNumbers(row.report, row.notes)[0] ?? null;
     const rep = reportNum != null ? reportByNum.get(reportNum) : null;
     const url = httpsOrNull(row.url) || (rep ? rep.url : null);
     const score = parseFloat(String(row.score || '').replace(/\*/g, ''));
@@ -157,14 +158,19 @@ export function buildSnapshot(input) {
     if (p != null) days[p].applied++;
   }
 
+  // Domains feed the Outlook sender watches: one must name one employer. A job board or aggregator (career-ops'
+  // own list, then match.js's) would pull in a whole board's mail; a domain two companies share names neither.
   const companies = [];
   const byNorm = new Map();
   for (const a of apps) {
     const norm = normalizeCompany(a.company);
     let c = byNorm.get(norm);
     if (!c) { c = { name: a.company, norm, domains: [] }; byNorm.set(norm, c); companies.push(c); }
-    if (a.url) for (const d of domainsFromUrl(a.url)) if (!c.domains.includes(d)) c.domains.push(d);
+    if (a.url && !isAggregatorUrl(a.url)) for (const d of domainsFromUrl(a.url)) if (!c.domains.includes(d)) c.domains.push(d);
   }
+  const owners = new Map();
+  for (const c of companies) for (const d of c.domains) owners.set(d, (owners.get(d) || 0) + 1);
+  for (const c of companies) c.domains = c.domains.filter((d) => owners.get(d) === 1);
 
   return {
     schema: 1,

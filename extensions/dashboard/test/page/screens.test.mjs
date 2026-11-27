@@ -231,13 +231,18 @@ test('reduced motion (prefs): no running animations after render', async () => {
 // No horizontal overflow at 4 widths x 3 theme modes; one screenshot per screen (outside the repo).
 const overflowScan = () => {
   const W = document.documentElement.clientWidth;
+  const clipped = (n) => { for (; n && n !== document.body; n = n.parentElement) { const r = n.getBoundingClientRect(); if (r.width <= 1 || r.height <= 1) return true; } return false; };
   const bad = [];
   for (const el of document.querySelectorAll('body *')) {
     const sc = el.closest('.scroll');
     if (sc && sc !== el) continue;
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) continue;
-    if (r.right > W + 1 || r.left < -1) bad.push(`${el.tagName.toLowerCase()}.${[...el.classList].join('.')}#${el.id} [${Math.round(r.left)}, ${Math.round(r.right)}]`);
+    const name = `${el.tagName.toLowerCase()}.${[...el.classList].join('.')}#${el.id}`;
+    if (r.right > W + 1 || r.left < -1) bad.push(`${name} [${Math.round(r.left)}, ${Math.round(r.right)}]`);
+    // content wider than its own box (global min-width:0 lets nowrap children shrink below their text)
+    // (.scroll containers scroll on purpose; visually-hidden boxes, e.g. .sr-only or the phone table header, are 1px wide)
+    else if (!el.closest('.scroll, .sr-only, .backdrop') && !clipped(el) && el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) bad.push(`${name} content ${el.scrollWidth} > box ${el.clientWidth}`);
   }
   return { sw: document.documentElement.scrollWidth, W, bad: bad.slice(0, 6) };
 };
@@ -259,3 +264,19 @@ for (const width of [360, 430, 720, 1440]) {
     });
   }
 }
+
+// Binding rule: every interactive control in a screen has a hit area >= 44px tall (430px phone).
+// No inline text links inside paragraphs exist in these screens, so nothing is excluded.
+test('touch targets: buttons, links, summaries and fields in screens are >= 44px tall at 430px', async () => {
+  const p = await open({ device: { width: 430, height: 900 }, reducedMotion: true });
+  try {
+    for (const s of SCREENS) {
+      await go(p, s);
+      const small = await p.page.evaluate((sel) => [...document.querySelectorAll(`${sel} :is(button, a[href], summary, select, input, textarea)`)]
+        .map((el) => ({ el, r: el.getBoundingClientRect() }))
+        .filter(({ r }) => r.width > 0 && r.height > 0 && r.height < 44)
+        .map(({ el, r }) => `${el.tagName.toLowerCase()}.${[...el.classList].join('.')} "${el.textContent.trim().slice(0, 20)}" ${Math.round(r.height)}px`), body(s));
+      assert.deepEqual(small, [], s);
+    }
+  } finally { await p.close(); }
+});

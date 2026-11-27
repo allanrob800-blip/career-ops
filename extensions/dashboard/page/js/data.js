@@ -30,6 +30,7 @@
   let kept = null; // last complete, generation-consistent Snapshot
   let failed = false; // terminal listener error / timeout with nothing to show
   let prefsCur = null; // last known prefs (listener or own write)
+  let prefsSeen = false; // the prefs listener has delivered: `prefs` is the stored value, not a default
 
   const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   const str = (v) => (typeof v === 'string' ? v : null);
@@ -91,6 +92,7 @@
     else status = 'loading';
     return {
       status, snapshot: kept, pending: pendingList(), prefs: { ...(prefsCur || DEFAULT_PREFS) },
+      prefs_loaded: prefsSeen || failed,
       synced_at: kept ? str(kept.generated_at) : null,
       stale: failed && !!kept,
     };
@@ -138,7 +140,7 @@
     });
     listen('requests', (n, e) => db.collection('requests').onSnapshot(n, e), (qs) => { reqDocs = bodies(qs); });
     listen('handled', (n, e) => db.collection('handled').onSnapshot(n, e), (qs) => { handledBodies = bodies(qs); });
-    listen('prefs', (n, e) => db.doc('settings/prefs').onSnapshot(n, e), (s) => { prefsBody = s.exists ? s.data() : null; prefsCur = normPrefs(prefsBody); });
+    listen('prefs', (n, e) => db.doc('settings/prefs').onSnapshot(n, e), (s) => { prefsBody = s.exists ? s.data() : null; prefsCur = normPrefs(prefsBody); prefsSeen = true; });
   }
 
   function start(cb) {

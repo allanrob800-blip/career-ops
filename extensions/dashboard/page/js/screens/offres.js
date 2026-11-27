@@ -1,4 +1,4 @@
-/* Offres: offers to evaluate + evaluated-not-applied, sorted by score; text filter; report summary panel. */
+/* Offres: offers to evaluate + evaluated-not-applied, sorted by score; text filter (also set from the palette); report summary panel. */
 (() => {
   'use strict';
   const Screens = (globalThis.Screens = globalThis.Screens || {});
@@ -91,6 +91,13 @@
         <ul class="offers">${list.map(card).join('')}</ul>
         <p class="empty-inline" id="offer-none" hidden>Aucune offre ne correspond à ce filtre.</p>`;
     });
+    if (CapUI.intent.offerQuery != null) { // from the ⌘K palette: show that offer
+      ui.q = String(CapUI.intent.offerQuery);
+      ui.kind = 'all';
+      delete CapUI.intent.offerQuery;
+      const f = root.querySelector('#offer-filter');
+      if (f) f.value = ui.q;
+    }
     applyFilter(root);
     if (!root.__capOffres) {
       root.__capOffres = true;

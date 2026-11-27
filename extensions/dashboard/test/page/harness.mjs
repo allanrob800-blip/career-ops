@@ -53,10 +53,11 @@ function contextOptions(device) {
 /**
  * Opens the page. Returns { page, context, errors, close }.
  * opts: { url (server url), device, theme, reducedMotion, fake, hash, now (fixed Date.now: Date|string|number),
- *         manualStart (app.js does not start CapData; the test calls CapData.start itself) }
+ *         manualStart (app.js does not start CapData; the test calls CapData.start itself),
+ *         init (function run in the page before its scripts, e.g. to record events) }
  */
 export async function openPage(browser, opts) {
-  const { url, device = { width: 1440, height: 900 }, theme, reducedMotion, fake, hash = '', now, manualStart } = opts;
+  const { url, device = { width: 1440, height: 900 }, theme, reducedMotion, fake, hash = '', now, manualStart, init } = opts;
   const context = await browser.newContext({
     ...contextOptions(device),
     ...(reducedMotion ? { reducedMotion: 'reduce' } : {}),
@@ -68,6 +69,7 @@ export async function openPage(browser, opts) {
   await context.addInitScript({ path: FAKE_CLAUDE });
   if (manualStart) await context.addInitScript(() => { globalThis.CAP_MANUAL_START = true; });
   if (fake) await context.addInitScript((f) => { Object.assign(window.__fake, f); }, fake);
+  if (init) await context.addInitScript(init);
   if (theme) {
     // <html> does not exist yet when init scripts run: set the attribute as soon as it appears.
     await context.addInitScript((t) => {

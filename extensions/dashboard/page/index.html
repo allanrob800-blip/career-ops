@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" class="cap-boot">
 <head>
 <meta charset="utf-8">
 <title>Cap</title>
@@ -12,8 +12,11 @@
 <body>
 <div class="backdrop" aria-hidden="true"></div>
 
+<div id="stage">
 <nav id="nav" aria-label="Navigation principale">
   <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Cap</span></div>
+  <button type="button" id="nav-search" class="nav-search" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><span>Rechercher</span><kbd class="kbd" data-shortcut>Ctrl K</kbd></button>
   <ul class="nav-list">
     <li><a class="nav-item" href="#accueil" data-route="accueil">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5M5.5 10v9.5h13V10"/></svg><span>Accueil</span></a></li>
@@ -34,7 +37,7 @@
   </ul>
 </nav>
 
-<div id="more-sheet" class="sheet" role="dialog" aria-label="Plus de pages" hidden>
+<div id="more-sheet" class="sheet" role="dialog" aria-modal="true" aria-label="Plus de pages" hidden>
   <div class="sheet-scrim" data-close-sheet></div>
   <div class="sheet-panel glass">
     <a class="sheet-item" href="#planning" data-route="planning">Planning</a>
@@ -44,6 +47,8 @@
 </div>
 
 <main id="main">
+  <button type="button" id="search-btn" class="icon-btn search-fab" aria-label="Rechercher" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg></button>
   <section id="screen-accueil" data-screen="accueil" aria-labelledby="h-accueil" hidden><h1 id="h-accueil">Accueil</h1><div class="screen-body"></div></section>
   <section id="screen-offres" data-screen="offres" aria-labelledby="h-offres" hidden><h1 id="h-offres">Offres</h1><div class="screen-body"></div></section>
   <section id="screen-candidatures" data-screen="candidatures" aria-labelledby="h-candidatures" hidden><h1 id="h-candidatures">Candidatures</h1><div class="screen-body"></div></section>
@@ -52,6 +57,7 @@
   <section id="screen-analytique" data-screen="analytique" aria-labelledby="h-analytique" hidden><h1 id="h-analytique">Analytique</h1><div class="screen-body"></div></section>
   <section id="screen-reglages" data-screen="reglages" aria-labelledby="h-reglages" hidden><h1 id="h-reglages">Réglages</h1><div class="screen-body"></div></section>
 </main>
+</div>
 
 <!-- Later tasks add their scripts here, in order: data.js, match.js, ui/charts/screens, outlook, palette, then app.js last. -->
 <script src="js/data.js"></script>
@@ -65,6 +71,8 @@
 <script src="js/outlook.js"></script>
 <script src="js/screens/planning.js"></script>
 <script src="js/screens/messages.js"></script>
+<script src="js/screens/reglages.js"></script>
+<script src="js/palette.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

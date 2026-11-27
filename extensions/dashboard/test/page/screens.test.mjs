@@ -1,5 +1,6 @@
 // Task 7: Accueil, Offres, Candidatures, Analytique on the fixture snapshot (and an empty db).
 // Task 8 adds Planning and Messages to the shared layout, touch-target, hostile-data and empty-state checks.
+// Task 9 adds Réglages, the open palette, the search buttons and the home Outlook failure rows to layout and touch targets.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
@@ -12,14 +13,15 @@ const SHOTS = join(tmpdir(), 'cap-shots');
 const SCREENS = ['accueil', 'offres', 'candidatures', 'analytique'];
 const OUTLOOK = ['planning', 'messages']; // Task 8: need a delivered Outlook section before they are measured
 const ALL = [...SCREENS, ...OUTLOOK];
+const EVERY = [...ALL, 'reglages']; // Réglages has no empty gate: it renders without a snapshot
 
 let server, browser, DOCS;
 before(async () => { DOCS = fixtureDocs(); server = await startServer(); browser = await launchBrowser(); mkdirSync(SHOTS, { recursive: true }); });
 after(async () => { await browser?.close(); await server?.close(); });
 
 async function open(opts = {}) {
-  const { docs = DOCS, ...rest } = opts;
-  const fake = { db: { docs: structuredClone(docs) }, mcp: { mode: 'ok', emails: EMAILS, events: EVENTS } };
+  const { docs = DOCS, mcp = {}, ...rest } = opts;
+  const fake = { db: { docs: structuredClone(docs) }, mcp: { mode: 'ok', emails: EMAILS, events: EVENTS, ...mcp } };
   const p = await openPage(browser, { url: server.url, now: NOW, fake, ...rest });
   p.page.setDefaultTimeout(5000);
   p.dialogs = [];
@@ -99,7 +101,7 @@ test('Offres: sorted by score, javascript: url never linked, https links kept, r
     assert.equal(await p.page.locator('.offer:visible').count(), 1);
     await p.page.locator('#offer-filter').fill('');
     await p.page.locator('.offer', { hasText: 'Acme' }).locator('button[data-report]').click();
-    const dlg = p.page.locator('[role=dialog][aria-modal=true]');
+    const dlg = p.page.locator('.dlg[role=dialog][aria-modal=true]');
     assert.ok(await dlg.isVisible());
     const txt = await dlg.innerText();
     assert.match(txt, /Product \/ Platform/);
@@ -119,7 +121,7 @@ test('Candidatures: status filter, detail sheet, status request -> pending doc +
     assert.equal(await p.page.locator('#app-list [data-num]:visible').count(), 3);
     await p.page.locator('[data-filter=all]').click();
     await p.page.locator('#app-list [data-num="3"] .row-open').click();
-    const dlg = p.page.locator('[role=dialog][aria-modal=true]');
+    const dlg = p.page.locator('.dlg[role=dialog][aria-modal=true]');
     assert.match(await dlg.innerText(), /Cobalt SAS/);
     const options = await dlg.locator('#detail-status option').evaluateAll((os) => os.map((o) => o.value));
     assert.deepEqual(options, ['Evaluated', 'Speculative', 'Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP']);
@@ -247,7 +249,7 @@ for (const width of [360, 430, 720, 1440]) {
     test(`layout ${width}px theme=${theme ?? 'none'}: no horizontal overflow, screenshots`, async () => {
       const p = await open({ device: { width, height: 900 }, theme, reducedMotion: true });
       try {
-        for (const s of ALL) {
+        for (const s of EVERY) {
           await go(p, s);
           await p.page.waitForTimeout(30);
           const r = await p.page.evaluate(overflowScan);
@@ -255,24 +257,78 @@ for (const width of [360, 430, 720, 1440]) {
           assert.deepEqual(r.bad, [], `${s}: elements past the right edge`);
           await p.page.screenshot({ path: join(SHOTS, `${s}-${width}-${theme ?? 'auto'}.png`), fullPage: true });
         }
+        // the open palette, with results, over the last screen
+        await go(p, 'accueil');
+        await p.page.keyboard.press('Control+K');
+        await p.page.locator('#palette').waitFor();
+        await p.page.locator('#pal-input').fill('a');
+        await p.page.waitForFunction(() => document.querySelectorAll('#pal-list [role=option]').length > 3);
+        const r = await p.page.evaluate(overflowScan);
+        assert.ok(r.sw <= r.W, `palette: scrollWidth ${r.sw} > ${r.W}`);
+        assert.deepEqual(r.bad, [], 'palette: elements past the right edge');
+        const box = await p.page.locator('#palette .pal-panel').boundingBox();
+        assert.ok(box.x >= 0 && box.x + box.width <= width && box.y >= 0, `palette panel inside the viewport: ${JSON.stringify(box)}`);
+        await p.page.screenshot({ path: join(SHOTS, `palette-${width}-${theme ?? 'auto'}.png`) });
         assert.deepEqual(p.errors, []);
       } finally { await p.close(); }
     });
   }
 }
 
+const tooSmall = (sel) => [...document.querySelectorAll(`${sel} :is(button, a[href], summary, select, input, textarea)`)]
+  .map((el) => ({ el, r: el.getBoundingClientRect() }))
+  .filter(({ r }) => r.width > 0 && r.height > 0 && r.height < 44)
+  .map(({ el, r }) => `${el.tagName.toLowerCase()}.${[...el.classList].join('.')} "${el.textContent.trim().slice(0, 20)}" ${Math.round(r.height)}px`);
+
 // Binding rule: every interactive control in a screen has a hit area >= 44px tall (430px phone).
 // No inline text links inside paragraphs exist in these screens, so nothing is excluded.
 test('touch targets: buttons, links, summaries and fields in screens are >= 44px tall at 430px', async () => {
   const p = await open({ device: { width: 430, height: 900 }, reducedMotion: true });
   try {
-    for (const s of ALL) {
+    for (const s of EVERY) {
       await go(p, s);
-      const small = await p.page.evaluate((sel) => [...document.querySelectorAll(`${sel} :is(button, a[href], summary, select, input, textarea)`)]
-        .map((el) => ({ el, r: el.getBoundingClientRect() }))
-        .filter(({ r }) => r.width > 0 && r.height > 0 && r.height < 44)
-        .map(({ el, r }) => `${el.tagName.toLowerCase()}.${[...el.classList].join('.')} "${el.textContent.trim().slice(0, 20)}" ${Math.round(r.height)}px`), body(s));
-      assert.deepEqual(small, [], s);
+      assert.deepEqual(await p.page.evaluate(tooSmall, body(s)), [], s);
     }
+    // the magnifier (phone search button), then the open palette: field, close button and every result row
+    await go(p, 'accueil');
+    const glass = await p.page.locator('#search-btn').boundingBox();
+    assert.ok(glass.width >= 44 && glass.height >= 44, `search button ${glass.width}x${glass.height}`);
+    await p.page.locator('#search-btn').click();
+    await p.page.locator('#palette').waitFor();
+    await p.page.locator('#pal-input').fill('a');
+    await p.page.waitForFunction(() => document.querySelectorAll('#pal-list [role=option]').length > 3);
+    assert.deepEqual(await p.page.evaluate(tooSmall, '#palette'), [], 'palette');
+    const rows = await p.page.locator('#pal-list [role=option]').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+    assert.ok(rows.every((h) => h >= 44), `result rows ${rows}`);
+    await p.page.keyboard.press('Escape');
+    // « Plus » sheet items
+    await p.page.locator('#more-btn').click();
+    await p.page.locator('#more-sheet').waitFor();
+    assert.deepEqual(await p.page.evaluate(tooSmall, '#more-sheet'), [], 'sheet');
   } finally { await p.close(); }
 });
+
+// Carried from Task 8: the Outlook failure rows of « À faire » are links and must be 44px tall too.
+for (const [label, mcp, count] of [
+  ['one reason for both sections (error)', { mode: 'error', code: 'needs_reauth' }, 1],
+  ['two different reasons', { mode: 'error', code: 'needs_reauth', byTool: { outlook_calendar_search: { code: 'approval_required' } } }, 2],
+  ['calendar only, mail working', { byTool: { outlook_calendar_search: { mode: 'error', code: 'upstream_error' } } }, 1],
+  ['connector absent (quiet rows)', { mode: 'null' }, 1],
+]) {
+  test(`touch targets: home Outlook failure rows are >= 44px tall at 430px — ${label}`, async () => {
+    const p = await open({ device: { width: 430, height: 900 }, reducedMotion: true, mcp });
+    try {
+      await go(p, 'accueil');
+      const notes = p.page.locator('#todo [data-outlook-note]');
+      await p.page.waitForFunction((n) => document.querySelectorAll('#todo [data-outlook-note]').length === n, count);
+      for (const a of await notes.locator('a').all()) {
+        const b = await a.boundingBox();
+        assert.ok(b.height >= 44, `failure row link ${Math.round(b.height)}px`);
+      }
+      assert.ok(await notes.locator('a').count() >= count);
+      assert.deepEqual(await p.page.evaluate(tooSmall, body('accueil')), []);
+      const r = await p.page.evaluate(overflowScan);
+      assert.deepEqual(r.bad, []);
+    } finally { await p.close(); }
+  });
+}

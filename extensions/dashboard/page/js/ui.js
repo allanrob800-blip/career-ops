@@ -113,6 +113,18 @@
   // ---- in-page dialog (no alert/confirm/prompt) ----
   let current = null;
   const FOCUSABLE = 'a[href], button:not([disabled]), select, textarea, input, [tabindex]:not([tabindex="-1"])';
+  // Keeps Tab / Shift+Tab inside `box` (dialog, palette, « Plus » sheet). Returns true when it handled the key.
+  function trapTab(box, e) {
+    if (e.key !== 'Tab') return false;
+    const f = [...box.querySelectorAll(FOCUSABLE)].filter((n) => !n.closest('[hidden]') && n.getClientRects().length);
+    if (!f.length) { e.preventDefault(); return true; }
+    const first = f[0], last = f[f.length - 1], a = document.activeElement;
+    if (!box.contains(a)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+    else if (e.shiftKey && a === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
+    return true;
+  }
+
   function dialog({ title, html = '', id = 'cap-dialog', onClose } = {}) {
     closeDialog();
     const back = document.activeElement;
@@ -138,12 +150,7 @@
     };
     const onKey = (e) => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
-      if (e.key !== 'Tab') return;
-      const f = [...el.querySelectorAll(FOCUSABLE)].filter((n) => !n.closest('[hidden]'));
-      if (!f.length) return;
-      const first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      trapTab(el, e);
     };
     el.addEventListener('click', (e) => { if (e.target.closest('[data-dlg-close]')) close(); });
     document.addEventListener('keydown', onKey, true);
@@ -220,10 +227,10 @@
   // Strip leading emoji / pictographs and "Strength:" style prefixes from report bullets.
   const cleanBullet = (s) => String(s ?? '').replace(/^[\s\p{Extended_Pictographic}️‍]+/u, '').replace(/^(strength|gap|point fort|lacune)\s*:\s*/i, '').trim();
 
-  const intent = {}; // cross-screen requests, e.g. { openApp: 3 } consumed by Candidatures
+  const intent = {}; // cross-screen requests: { openApp: 3 } for Candidatures, { offerQuery: 'Acme' } for Offres
 
   globalThis.CapUI = {
-    esc, safeHref, hostOf, fold, countUp, toast, dialog, closeDialog, gate, rebuild, reduced, emptyBlock, outlookNote,
+    esc, safeHref, hostOf, fold, countUp, toast, dialog, closeDialog, trapTab, gate, rebuild, reduced, emptyBlock, outlookNote,
     STATUSES, statusLabel, tone, isSent, figures, SENT, REPLIED, INTERVIEWED, OFFERED, CLOSED,
     today, parisHour, isoDay, addDays, daysBetween, week, fmtDay, fmtLong, fmtWeekday, fmtStamp, fmtNum, fmtPct, plural,
     ICON, cleanBullet, intent,

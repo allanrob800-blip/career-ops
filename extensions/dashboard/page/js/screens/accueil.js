@@ -42,11 +42,13 @@
   const expected = (num, fallback) => (globalThis.CapData && CapData.expectedStatus(num)) || fallback;
 
   // « À envoyer »: the applications whose dossier is ready and that are not sent (nor closed, nor asked to be), oldest
-  // prepared first.
-  function toSend(apps) {
+  // prepared first. A dossier with a retouche asked for (in the snapshot, or a request still pending) is not ready.
+  function toSend(apps, pending) {
     const at = (a) => { const t = Date.parse(a.dossier.prepared_at); return Number.isNaN(t) ? Infinity : t; };
+    const retouche = new Set((Array.isArray(pending) ? pending : []).filter((p) => p.type === 'retouche' && p.state === 'pending').map((p) => p.ref));
     return apps.filter((a) => {
       if (!isObj(a) || !Number.isInteger(a.num) || !isObj(a.dossier) || a.dossier.state !== 'pret') return false;
+      if (a.dossier.retouche_pending === true || retouche.has(a.num)) return false;
       const st = expected(a.num, a.status);
       return !CapUI.isoDay(a.applied_on) && !CapUI.SENT.has(st) && !CapUI.CLOSED.has(st);
     }).sort((a, b) => (at(a) - at(b)) || a.num - b.num);
@@ -207,7 +209,7 @@
     const today = CapUI.today();
     const apps = Array.isArray(snap.apps) ? snap.apps : [];
     // both lists also depend on the handled/ store and on requests written here (CapData), not only on `state`
-    const lists = { send: toSend(apps), confirm: toConfirm(snap) };
+    const lists = { send: toSend(apps, state.pending), confirm: toConfirm(snap) };
     const sig = JSON.stringify([snap.generation, state.pending.map((p) => p.id + p.state), state.prefs.weekly_goal, outlookSig(ctx.outlook), today, state.stale, h1 && h1.textContent,
       lists.send.map((a) => a.num), lists.confirm.map((p) => p.id)]);
     CapUI.rebuild(root, 'accueil', sig, () => paint(root, state, ctx, today, lists));

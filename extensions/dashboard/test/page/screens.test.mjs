@@ -1095,3 +1095,20 @@ test('Sheet: a failed note request enables its button again; the retry writes on
     assert.equal((await requests(p)).filter((r) => r.type === 'note').length, 1);
   } finally { await p.close(); }
 });
+
+// final wave F9: a dossier with a retouche asked for is not ready to send
+test('Accueil « À envoyer »: a dossier with a pending retouche (snapshot or page request) is not listed', async () => {
+  const docs = structuredClone(DOCS);
+  patchApp(docs, 3, { status: 'Evaluated', applied_on: null, dossier: { ...dossierOf(1), prepared_at: '2026-11-18T07:50:00Z', letter_state: 'prete', has_why: true, retouche_pending: true } });
+  patchApp(docs, 6, { status: 'Evaluated', applied_on: null, dossier: { ...dossierOf(1), prepared_at: '2026-11-19T07:50:00Z', letter_state: 'prete', has_why: true } });
+  const p = await open({ docs });
+  try {
+    await go(p, 'accueil');
+    const rows = p.page.locator('#to-send [data-send]');
+    await p.page.locator('#to-send').waitFor();
+    assert.deepEqual(await rows.evaluateAll((l) => l.map((r) => r.dataset.send)), ['6', '1'], 'Cobalt (3) has a retouche pending');
+    await p.page.evaluate(() => CapData.requestRetouche(6, 'Mettre la roadmap en avant'));
+    await p.page.waitForFunction(() => [...document.querySelectorAll('#to-send [data-send]')].map((r) => r.dataset.send).join() === '1');
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});

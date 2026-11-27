@@ -36,15 +36,15 @@
 
 ## Points de vigilance pour la revue
 
-1. **Tracker absent ou vide** (installation neuve) : l'export produit un instantané valide avec des listes vides, et la page affiche des états vides explicites, sans erreur. Testé en tâche 2 et en tâche 7.
-2. **Contenu hostile** dans un nom d'entreprise, un objet d'e-mail ou une URL (`<img src=x onerror=…>`, `javascript:alert(1)`) : affiché comme du texte, sans lien et sans exécution. Testé en tâche 7.
-3. **Outlook indisponible** (`mcp` vaut `null`, consentement refusé, ou outil en erreur) : les écrans Messages et Planning affichent un état clair avec la raison, et le reste fonctionne. Testé en tâche 8.
-4. **Synchronisation à moitié écrite** (une partie des documents d'une nouvelle génération seulement) : la page garde l'ancienne génération complète jusqu'à ce que toutes les parties de la nouvelle soient présentes. Testé en tâche 6.
-5. **Demande périmée ou invalide** (statut inconnu, ligne disparue, statut déjà changé) : rejetée avec la raison renvoyée par `set-status.mjs`, sans rien écrire, et affichée dans la page. Testé en tâche 4.
+1. **Tracker absent ou vide** (installation neuve) : l'export produit un instantané valide avec des listes vides, et la page affiche des états vides explicites, sans erreur. Testé en Task 2 et en tâche 7.
+2. **Contenu hostile** dans un nom d'entreprise, un objet d'e-mail ou une URL (`<img src=x onerror=…>`, `javascript:alert(1)`) : affiché comme du texte, sans lien et sans exécution. Testé en Task 7.
+3. **Outlook indisponible** (`mcp` vaut `null`, consentement refusé, ou outil en erreur) : les écrans Messages et Planning affichent un état clair avec la raison, et le reste fonctionne. Testé en Task 8.
+4. **Synchronisation à moitié écrite** (une partie des documents d'une nouvelle génération seulement) : la page garde l'ancienne génération complète jusqu'à ce que toutes les parties de la nouvelle soient présentes. Testé en Task 6.
+5. **Demande périmée ou invalide** (statut inconnu, ligne disparue, statut déjà changé) : rejetée avec la raison renvoyée par `set-status.mjs`, sans rien écrire, et affichée dans la page. Testé en Task 4.
 
 ---
 
-### Tâche 1 : rattacher un texte à une entreprise (code commun Node et navigateur)
+### Task 1: rattacher un texte à une entreprise (code commun Node et navigateur)
 
 **Fichiers :**
 - Créer : `extensions/dashboard/page/js/match.js` (script classique, qui expose `globalThis.CapMatch`)
@@ -99,7 +99,7 @@ Une IIFE qui affecte `globalThis.CapMatch`. Aucune API Node ni DOM.
 
 ---
 
-### Tâche 2 : construire l'instantané (fonctions pures)
+### Task 2: construire l'instantané (fonctions pures)
 
 **Fichiers :**
 - Créer : `extensions/dashboard/lib/report-summary.mjs`, `extensions/dashboard/lib/snapshot.mjs`
@@ -178,7 +178,7 @@ Attendu : ÉCHEC.
 
 ---
 
-### Tâche 3 : découper en documents et exporter en ligne de commande
+### Task 3: découper en documents et exporter en ligne de commande
 
 **Fichiers :**
 - Créer : `extensions/dashboard/lib/chunk.mjs`, `extensions/dashboard/export.mjs`
@@ -226,7 +226,7 @@ Les fichiers absents sont lus comme `''`. Les rapports sont lus dans `{root}/rep
 
 ---
 
-### Tâche 4 : appliquer les demandes de la page
+### Task 4: appliquer les demandes de la page
 
 **Fichiers :**
 - Créer : `extensions/dashboard/apply-requests.mjs`
@@ -275,7 +275,7 @@ test('invalid requests are rejected without writing', () => {
 
 ---
 
-### Tâche 5 : banc d'essai de la page (harnais Playwright)
+### Task 5: banc d'essai de la page (harnais Playwright)
 
 **Fichiers :**
 - Créer : `extensions/dashboard/test/page/harness.mjs` et `extensions/dashboard/test/page/fake-claude.js`
@@ -316,7 +316,7 @@ Le squelette comprend :
 
 ---
 
-### Tâche 6 : données de la page (base, générations, demandes, préférences)
+### Task 6: données de la page (base, générations, demandes, préférences)
 
 **Fichiers :**
 - Créer : `extensions/dashboard/page/js/data.js` (expose `globalThis.CapData`)
@@ -351,7 +351,7 @@ Le squelette comprend :
 
 ---
 
-### Tâche 7 : écrans Accueil, Offres, Candidatures et Analytique
+### Task 7: écrans Accueil, Offres, Candidatures et Analytique
 
 **Fichiers :**
 - Créer : `extensions/dashboard/page/js/ui.js` (échappement, compteurs animés, notifications brèves, boîte de dialogue maison), `page/js/charts.js`, `page/js/screens/accueil.js`, `offres.js`, `candidatures.js`, `analytique.js`
@@ -407,7 +407,7 @@ Le style suit la spécification § 6.5 et commence par le commentaire de six lig
 
 ---
 
-### Tâche 8 : Outlook en direct (Messages, Planning, « à traiter »)
+### Task 8: Outlook en direct (Messages, Planning, « à traiter »)
 
 **Fichiers :**
 - Créer : `extensions/dashboard/page/js/outlook.js` (`globalThis.CapOutlook`), `page/js/screens/messages.js`, `page/js/screens/planning.js`
@@ -448,7 +448,7 @@ Le style suit la spécification § 6.5 et commence par le commentaire de six lig
 
 ---
 
-### Tâche 9 : recherche ⌘K, réglages, thèmes et animations d'ouverture
+### Task 9: recherche ⌘K, réglages, thèmes et animations d'ouverture
 
 **Fichiers :**
 - Créer : `extensions/dashboard/page/js/palette.js`, `page/js/screens/reglages.js`
@@ -488,7 +488,7 @@ Le style suit la spécification § 6.5 et commence par le commentaire de six lig
 
 ---
 
-### Tâche 10 : publication, déclaration des capacités et première synchronisation
+### Task 10: publication, déclaration des capacités et première synchronisation
 
 Cette tâche a besoin d'une session interactive avec le candidat. Elle ne doit pas être confiée à un sous-agent.
 

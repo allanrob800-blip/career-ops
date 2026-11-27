@@ -74,13 +74,14 @@ test('fake claude: use() resolves namespaces, null for mcp null mode and unknown
   try {
     const r = await p.page.evaluate(async () => {
       const db = await window.claude.use('db');
-      const meta = await db.doc('snapshot/meta').get();
+      const metaSnap = await db.doc('snapshot/meta').get();
+      const meta = { exists: metaSnap.exists, data: metaSnap.data() };
       const events = [];
-      const unsub = db.doc('snapshot/meta').onSnapshot((s) => events.push(s.data && s.data.v));
+      const unsub = db.doc('snapshot/meta').onSnapshot((s) => events.push(s.data().v));
       await new Promise((r) => setTimeout(r, 20));
       await db.doc('snapshot/meta').update({ v: 2 });
       unsub();
-      return { meta, events, mcp: await window.claude.use('mcp'), nope: await window.claude.use('zzz'), uid: (await window.claude.use('user')).id(), calls: window.__calls.length };
+      return { meta, events, mcp: await window.claude.use('mcp'), nope: await window.claude.use('zzz'), uid: await (await window.claude.use('user')).id(), calls: window.__calls.length };
     });
     assert.equal(r.meta.exists, true);
     assert.deepEqual(r.meta.data, { v: 1 });

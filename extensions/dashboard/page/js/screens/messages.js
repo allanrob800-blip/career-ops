@@ -48,6 +48,10 @@
   function html(sec, messages) {
     const { esc } = CapUI;
     if (sec.status === 'unavailable' || sec.status === 'error') return CapUI.outlookNote(sec, 'mail');
+    return list(sec, messages, esc);
+  }
+
+  function list(sec, messages, esc) {
     if (sec.status !== 'ok' || (sec.partial && !messages.length)) {
       return `<div class="loading" role="status"><span class="sr-only">Chargement des messages Outlook…</span>${'<div class="card glass skel"></div>'.repeat(2)}</div>`;
     }
@@ -61,14 +65,17 @@
   }
 
   function render(root, state, ctx = {}) {
-    if (!CapUI.gate(root, state, EMPTY)) { delete root.dataset.outlook; return; }
+    // A sync cut short: the notice, and the messages anyway (Outlook runs on the stored meta's companies).
+    const incomplete = !!state && state.status === 'incomplete' && !state.snapshot;
+    if (!incomplete && !CapUI.gate(root, state, EMPTY)) { delete root.dataset.outlook; return; }
     const o = ctx.outlook || {};
     const sec = o.mail || { status: 'loading' };
     const messages = sec.status === 'ok' && Array.isArray(o.messages) ? o.messages : [];
     for (const id of sending) if (!messages.some((m) => m.id === id && !m.handled)) sending.delete(id);
     root.dataset.outlook = sec.status;
-    const sig = JSON.stringify([sec, messages.map((m) => [m.id, m.handled, m.company, m.subject, m.receivedDateTime]), [...sending]]);
-    CapUI.rebuild(root, 'messages', sig, () => { root.innerHTML = html(sec, messages); });
+    const note = incomplete ? CapUI.incompleteNote(state) : '';
+    const sig = JSON.stringify([note, sec, messages.map((m) => [m.id, m.handled, m.company, m.subject, m.receivedDateTime]), [...sending]]);
+    CapUI.rebuild(root, 'messages', sig, () => { root.innerHTML = note + html(sec, messages); });
   }
 
   // one delegated listener per root

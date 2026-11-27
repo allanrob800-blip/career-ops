@@ -20,6 +20,8 @@
   let readyResolve;
   let ready = new Promise((r) => { readyResolve = r; });
   let timer = null;
+  let ceiling = null; // the 10 s loading ceiling, independent of listener deliveries
+  let ceilingPassed = false;
   const unsubs = [];
 
   // raw listener results
@@ -86,13 +88,18 @@
   function currentState() {
     const cand = assemble();
     if (cand && (!kept || kept.generation !== cand.generation)) kept = cand;
+    const meta = snapDocs && snapDocs.get('meta');
     let status;
     if (kept) status = 'ok';
     else if (failed) status = 'unavailable';
     else if (snapLive && snapDocs && !snapDocs.has('meta')) status = 'empty';
+    // a meta whose parts never all arrived (a sync cut short): say so rather than load forever
+    else if (ceilingPassed && isObj(meta)) status = 'incomplete';
     else status = 'loading';
     return {
       status, snapshot: kept, pending: pendingList(), prefs: { ...(prefsCur || DEFAULT_PREFS) },
+      // what the stored meta alone tells (Outlook can start from its companies when no snapshot is complete)
+      meta: isObj(meta) ? { generated_at: str(meta.generated_at), companies: Array.isArray(meta.companies) ? meta.companies : [] } : null,
       prefs_loaded: prefsSeen || failed,
       synced_at: kept ? str(kept.generated_at) : null,
       stale: failed && !!kept,
@@ -150,6 +157,7 @@
     started = true;
     emit();
     timer = setTimeout(() => { timer = null; if (!snapLive) { failed = true; emit(); } }, LOADING_MS);
+    ceiling = setTimeout(() => { ceiling = null; ceilingPassed = true; emit(); }, LOADING_MS);
     (async () => {
       let claude = null;
       try { claude = globalThis.claude || null; } catch { /* absent */ }
@@ -304,6 +312,7 @@
 
   function stop() {
     clearTimer();
+    if (ceiling) { clearTimeout(ceiling); ceiling = null; }
     unsubs.splice(0).forEach((u) => { try { u(); } catch { /* ignore */ } });
     onChange = null;
   }

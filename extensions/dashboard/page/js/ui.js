@@ -164,6 +164,13 @@
 
   // ---- loading / empty / unavailable gate ----
   const UNAVAILABLE = ['Données indisponibles pour l\'instant', 'La base de la page ne répond pas. Réessayez dans un moment : vos données ne sont pas perdues.'];
+  const INCOMPLETE = 'Synchronisation incomplète — les données seront rétablies à la prochaine session';
+  // The notice shown while the stored meta's parts are missing (a sync cut short), with the meta's date if known.
+  function incompleteNote(state) {
+    const at = state && state.meta && state.meta.generated_at;
+    const when = at && !Number.isNaN(Date.parse(at)) ? `Synchronisation du ${fmtStamp(at)} interrompue avant la fin.` : 'La dernière synchronisation s\'est interrompue avant la fin.';
+    return emptyBlock(INCOMPLETE, `${when} Vos données ne sont pas perdues : Claude les renverra.`);
+  }
   function emptyBlock(title, text) {
     return `<div class="card empty glass"><svg class="empty-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3 2"/></svg>
       <p class="empty-title">${esc(title)}</p><p class="empty-text">${esc(text)}</p></div>`;
@@ -180,6 +187,9 @@
     if (!state || state.status === 'loading') {
       view = 'gate-loading';
       html = `<div class="loading" role="status"><span class="sr-only">Chargement des données…</span>${'<div class="card glass skel"></div>'.repeat(3)}</div>`;
+    } else if (state.status === 'incomplete' && !state.snapshot) {
+      view = 'gate-incomplete';
+      html = incompleteNote(state);
     } else if (state.status === 'unavailable' && !state.snapshot) {
       view = 'gate-unavailable';
       html = emptyBlock(...UNAVAILABLE);
@@ -187,7 +197,7 @@
       view = 'gate-empty';
       html = emptyBlock(...empty);
     } else return true;
-    if (root.dataset.view !== view) { root.innerHTML = html; root.dataset.view = view; root.dataset.sig = ''; }
+    if (root.dataset.view !== view || root.dataset.sig !== html) { root.innerHTML = html; root.dataset.view = view; root.dataset.sig = html; }
     return false;
   }
 
@@ -230,7 +240,7 @@
   const intent = {}; // cross-screen requests: { openApp: 3 } for Candidatures, { offerQuery: 'Acme' } for Offres
 
   globalThis.CapUI = {
-    esc, safeHref, hostOf, fold, countUp, toast, dialog, closeDialog, trapTab, gate, rebuild, reduced, emptyBlock, outlookNote,
+    esc, safeHref, hostOf, fold, countUp, toast, dialog, closeDialog, trapTab, gate, rebuild, reduced, emptyBlock, outlookNote, incompleteNote, INCOMPLETE,
     STATUSES, statusLabel, tone, isSent, figures, SENT, REPLIED, INTERVIEWED, OFFERED, CLOSED,
     today, parisHour, isoDay, addDays, daysBetween, week, fmtDay, fmtLong, fmtWeekday, fmtStamp, fmtNum, fmtPct, plural,
     ICON, cleanBullet, intent,

@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getCareerOpsRoot, resolveTrackerPath } from '../../path-resolver.mjs';
 import { trackerStatusByNum } from '../../stats.mjs';
+import { parseDbLines } from './lib/db-lines.mjs';
 
 const execFileP = promisify(execFile);
 const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -57,26 +58,8 @@ export function validate(data) {
   return null;
 }
 
-/**
- * Reads the requests file: a JSON array, or the db_query / db_list line format.
- * Returns [{id, data, version}] (version undefined when the input has none).
- */
-export function parseInput(text) {
-  const src = String(text ?? '');
-  try {
-    const whole = JSON.parse(src);
-    if (Array.isArray(whole)) return whole;
-  } catch { /* line format */ }
-  const out = [];
-  for (const line of src.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t.startsWith('{')) continue;
-    let o;
-    try { o = JSON.parse(t); } catch { continue; }
-    if (isObj(o) && typeof o.id === 'string' && 'data' in o) out.push(o);
-  }
-  return out;
-}
+/** Reads the requests file: a JSON array, or the db_query / db_list line format. */
+export const parseInput = parseDbLines;
 
 function currentStatus(ref) {
   const path = resolveTrackerPath(getCareerOpsRoot());

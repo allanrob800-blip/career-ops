@@ -64,7 +64,9 @@
       d.textContent = `Le ${CapUI.fmtStamp(s.synced_at)}${s.stale ? ' · peut-être pas à jour' : ''}`;
       d.classList.toggle('is-stale', !!s.stale);
     } else {
-      d.textContent = s.status === 'loading' ? 'Chargement…' : s.status === 'unavailable' ? 'Données indisponibles pour l\'instant' : 'Pas encore de synchronisation : ouvrez une session career-ops.';
+      d.textContent = s.status === 'loading' ? 'Chargement…' : s.status === 'unavailable' ? 'Données indisponibles pour l\'instant'
+        : s.status === 'incomplete' ? `${CapUI.INCOMPLETE}${s.meta && s.meta.generated_at ? ` (commencée le ${CapUI.fmtStamp(s.meta.generated_at)})` : ''}.`
+          : 'Pas encore de synchronisation : ouvrez une session career-ops.';
       d.classList.remove('is-stale');
     }
   }

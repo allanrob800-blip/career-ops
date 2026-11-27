@@ -529,3 +529,58 @@ test('event times: a {dateTime, timeZone} pair keeps its wall clock and resolves
     assert.deepEqual(r.bad, [null, null, null, null]);
   } finally { await p.close(); }
 });
+
+// I3: the clock is simulated (manual start, then CapApp.connect under page.clock), the DOM is read directly.
+async function openClocked(fake) {
+  const p = await openPage(browser, { url: server.url, manualStart: true, reducedMotion: true, fake });
+  await p.page.clock.install({ time: new Date(NOW) });
+  await p.page.evaluate(() => CapApp.connect());
+  return p;
+}
+const screenText = (p, name) => p.page.evaluate(async (n) => {
+  location.hash = n;
+  await new Promise((r) => setTimeout(r, 0));
+  return document.querySelector(`#screen-${n} .screen-body`).textContent.replace(/\s+/g, ' ');
+}, name);
+
+test('a sync cut short before any complete generation: every screen says so, Outlook starts from the meta', async () => {
+  const docs = { 'snapshot/meta': structuredClone(DOCS['snapshot/meta']) }; // the parts never arrived
+  const p = await openClocked({ db: { docs }, mcp: { mode: 'ok', emails: EMAILS, events: EVENTS } });
+  try {
+    await p.page.clock.runFor(2000);
+    assert.match(await screenText(p, 'accueil'), /Chargement/);
+    await p.page.clock.runFor(9000);
+    const notice = /Synchronisation incomplète — les données seront rétablies à la prochaine session/;
+    for (const s of ['accueil', 'offres', 'candidatures', 'analytique', 'planning', 'messages']) {
+      await p.page.clock.runFor(100);
+      assert.match(await screenText(p, s), notice, s);
+    }
+    await p.page.clock.runFor(100);
+    const msgs = await screenText(p, 'messages');
+    assert.match(msgs, /Suite à notre échange/); // matched to Acme through the meta's companies
+    assert.match(await p.page.evaluate(() => document.querySelector('#screen-messages [data-group="Acme"]')?.textContent || ''), /Acme/);
+    const senders = await p.page.evaluate(() => window.__calls.filter((c) => c.ns === 'mcp' && c.args[2] && c.args[2].sender).map((c) => c.args[2].sender));
+    assert.deepEqual(senders, ['acme.fr']);
+    assert.match(await screenText(p, 'reglages'), /Synchronisation incomplète/);
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});
+
+test('an Outlook section still loading 10 s after start says « Outlook ne répond pas pour l\'instant. »', async () => {
+  const p = await openClocked({ db: { docs: structuredClone(DOCS) }, mcp: { mode: 'ok', emails: EMAILS, events: EVENTS, latencyMs: 60000 } });
+  try {
+    await p.page.clock.runFor(3000);
+    assert.equal(await p.page.evaluate(() => CapOutlook.getState().mail.status), 'loading');
+    await p.page.clock.runFor(8000);
+    const st = await p.page.evaluate(() => CapOutlook.getState());
+    assert.deepEqual([st.mail.status, st.calendar.status], ['error', 'error']);
+    assert.match(await screenText(p, 'messages'), /Outlook ne répond pas pour l'instant\./);
+    await p.page.clock.runFor(100);
+    assert.match(await screenText(p, 'planning'), /Outlook ne répond pas pour l'instant\./);
+    await p.page.clock.runFor(100);
+    assert.match(await screenText(p, 'accueil'), /Outlook ne répond pas pour l'instant\./);
+    await p.page.clock.runFor(60000); // the answer finally comes: the data replaces the message
+    assert.equal(await p.page.evaluate(() => CapOutlook.getState().mail.status), 'ok');
+    assert.deepEqual(p.errors, []);
+  } finally { await p.close(); }
+});

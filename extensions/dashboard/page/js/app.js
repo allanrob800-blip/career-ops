@@ -112,8 +112,9 @@
   // Outlook starts once, with the first snapshot that carries companies (never from a render). Later snapshots
   // and handled-message changes only refresh it: existing watches are never registered again.
   let outlookStarted = false;
+  // A sync cut short (status 'incomplete'): no snapshot is complete, so it starts from the stored meta's companies.
   function syncOutlook(s) {
-    const snap = s.snapshot;
+    const snap = s.snapshot || (s.status === 'incomplete' && s.meta ? { companies: s.meta.companies, apps: [] } : null);
     if (!globalThis.CapOutlook || !snap || !Array.isArray(snap.companies)) return;
     const companies = CapOutlook.rank(snap.companies, snap.apps);
     if (outlookStarted) { CapOutlook.update(companies); return; }

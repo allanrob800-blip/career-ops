@@ -51,15 +51,37 @@ test('generation safety: new meta alone keeps old generation, complete parts swi
   } finally { await p.close(); }
 });
 
-test('a half-written first generation stays loading, then becomes ok', async () => {
+test('a half-written first generation: loading, then « incomplete » after 10 s, then ok once the parts arrive', async () => {
   const g1 = gen('g1');
-  const p = await open(metaOnly(g1));
+  const p = await openPage(browser, { url: server.url, manualStart: true, fake: { db: { docs: metaOnly(g1) } } });
   try {
-    await settle(p);
+    await p.page.clock.install();
+    await p.page.evaluate(() => { window.__states = []; CapData.start((s) => window.__states.push(JSON.parse(JSON.stringify(s)))); });
+    await p.page.clock.runFor(500);
     assert.equal((await last(p)).status, 'loading');
+    await p.page.clock.runFor(10000);
+    const s = await last(p);
+    assert.equal(s.status, 'incomplete');
+    assert.equal(s.snapshot, null);
+    assert.deepEqual(s.meta, { generated_at: g1['snapshot/meta'].generated_at, companies: [] });
     for (const part of g1['snapshot/meta'].parts) await writeDoc(p, part, g1[part]);
-    await settle(p);
+    await p.page.clock.runFor(100);
     assert.equal((await last(p)).status, 'ok');
+  } finally { await p.close(); }
+});
+
+test('a sync cut short after a complete generation keeps showing that generation (never incomplete)', async () => {
+  const g1 = gen('g1'), g2 = gen('g2');
+  const p = await openPage(browser, { url: server.url, manualStart: true, fake: { db: { docs: { ...g1 } } } });
+  try {
+    await p.page.clock.install();
+    await p.page.evaluate(() => { window.__states = []; CapData.start((s) => window.__states.push(JSON.parse(JSON.stringify(s)))); });
+    await p.page.clock.runFor(500);
+    await writeDoc(p, 'snapshot/meta', g2['snapshot/meta']);
+    await p.page.clock.runFor(11000);
+    const s = await last(p);
+    assert.equal(s.status, 'ok');
+    assert.equal(s.snapshot.generation, 'g1');
   } finally { await p.close(); }
 });
 

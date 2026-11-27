@@ -16,6 +16,7 @@
   const MAX_DOMAINS = 10;
   const LIMIT = 25;
   const REFETCH_MS = 300000;
+  const LOADING_MS = 10000; // a section with no answer after this says Outlook is not answering
   const DAY_MS = 86400000;
   const HOUR_MS = 3600000;
   const PARIS = 'Europe/Paris';
@@ -142,6 +143,7 @@
   const watches = []; // {section, tool, input, key, domain, items: array|null, storedAt: ms|null, error: code|null, off}
   const busy = { mail: false, calendar: false };
   let lastSig = null;
+  let waited = false; // LOADING_MS have passed since start
 
   function cleanCompanies(list) {
     const out = [];
@@ -220,15 +222,17 @@
   }
 
   // ---- derived state ----
+  const LOADING = { status: 'loading', reason: null, code: null };
+  const SILENT = { status: 'error', reason: TEXT.transient, code: null };
   function sectionState(name) {
-    if (mcp === undefined) return { status: 'loading', reason: null, code: null };
+    if (mcp === undefined) return waited ? SILENT : LOADING;
     if (mcp === null) return { status: 'unavailable', reason: TEXT.absent, code: null };
     const ws = watches.filter((w) => w.section === name);
     const errs = ws.filter((w) => w.error).map((w) => w.error);
     const block = errs.find((c) => ABSENT.has(c)) || errs.find((c) => RETRACT.has(c));
     if (block) return { status: ABSENT.has(block) ? 'unavailable' : 'error', reason: reasonFor(block), code: block, canAuthorize: APPROVAL.has(block) };
     const got = ws.filter((w) => w.items !== null);
-    if (!got.length) return errs.length ? { status: 'error', reason: TEXT.transient, code: errs[0] } : { status: 'loading', reason: null, code: null };
+    if (!got.length) return errs.length ? { status: 'error', reason: TEXT.transient, code: errs[0] } : waited ? SILENT : LOADING;
     const stale = errs.length > 0; // transient failure: last good data stays, marked as possibly out of date
     return {
       status: 'ok', reason: stale ? TEXT.transient : null, code: stale ? errs[0] : null, stale,
@@ -328,6 +332,7 @@
     if (started) { emit(); return; }
     started = true;
     emit(); // 'loading'
+    setTimeout(() => { waited = true; emit(); }, LOADING_MS);
     (async () => {
       let ns = null;
       try { ns = globalThis.claude ? await globalThis.claude.use('mcp') : null; } catch { ns = null; }

@@ -42,13 +42,25 @@ const LINKEDIN_PENDING = '`- [!] {URL} — JD unavailable; paste text or provide
 const SPECIFIC = {
   // The Éclaireur reads each posting once and keeps it as a jds/ capture the Évaluateur reuses.
   eclaireur: ['capture-jd.mjs', 'en faire une capture `jds/`', 'Enregistrer une capture', LINKEDIN_PENDING,
-    'Ta lecture est la seule tentative de navigateur pour cette offre dans tout le passage'],
+    'Ta lecture est la seule tentative de navigateur pour cette offre dans tout le passage',
+    // A republished posting (same employer, same or near role, new URL) goes to the Évaluateur flagged.
+    'republication de #NNN', '`maxAge: 0`'],
   candidature: ["S'arrêter avant le bouton d'envoi", 'node apply-scope.mjs launch-options'],
   'expert-cv-lettre': ['check-strategy.mjs', 'deux essais au plus', 'a_verifier', LETTER_RULE],
   suivi: ['reply-watch', 'proposals.json', 'relances.json', 'lecture seule'],
   evaluateur: ['posting-guard.mjs', 'check-liveness.mjs', 'reserve-report-num.mjs', 'merge-tracker.mjs',
     "node capture-jd.mjs --find '<url>'", 'tu réutilises cette capture, sans relire la page',
-    'Ne jamais relire une offre LinkedIn déjà tentée ce passage', LINKEDIN_PENDING],
+    'Ne jamais relire une offre LinkedIn déjà tentée ce passage', LINKEDIN_PENDING,
+    // Liveness in the cloud: one check-liveness run, then the Firecrawl read of the capture (README › Environnement cloud).
+    '`check-liveness.mjs` **une seule fois**', 'ne pas le relancer',
+    'ne pas fixer `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`', 'réutiliser la lecture Firecrawl déjà faite pour la capture',
+    '`**Verification:** active per rendered read (Firecrawl, AAAA-MM-JJ)`', '`**Verification:** unconfirmed (batch mode)`',
+    // A Welcome to the Jungle company page is the employer's own publication.
+    'Welcome to the Jungle : le verdict `employer_url` est accepté tel quel', '`isAggregatorUrl`',
+    // Republication with a material change: re-evaluation in place, on the existing tracker row (merge-tracker Pass 0).
+    'republication de #NNN', '`**Supersedes:** report #NNN`', '## Ce qui a changé', 'jamais une deuxième ligne',
+    "même `num`, même `company` et même `role` que la ligne existante", "l'URL de la ligne existante",
+    'node merge-tracker.mjs --dry-run', 'doublon de #NNN'],
 };
 
 const EMAIL = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/u;
@@ -101,7 +113,9 @@ test('README: agents table, file contracts, routine, postule, Mac install, updat
   for (const s of ['.career-ops-data', 'npm install', 'npx playwright install chromium', 'gh auth login',
     'Enregistrer une capture', 'findCaptureForUrl', 'select-for-prep.mjs', 'check-strategy.mjs', 'render-pages.mjs', 'record-assets.mjs', 'apply-requests.mjs',
     'export.mjs', 'CAREER_OPS_TRUST_PROXY_EGRESS=1', 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium',
-    'update-system.mjs:', 'lib/update-manifest.mjs:']) {
+    'update-system.mjs:', 'lib/update-manifest.mjs:',
+    // Cloud liveness facts and the republication flow.
+    'lib/browser-launch.mjs', 'DNS resolution returned no addresses', 'republication de #NNN', 'doublon de #NNN']) {
     assert.ok(text.includes(s), `missing: ${s}`);
   }
   assert.doesNotMatch(text, EMAIL);

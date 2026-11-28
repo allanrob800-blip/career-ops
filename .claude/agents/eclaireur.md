@@ -32,10 +32,11 @@ Ta fonction : trouver les nouvelles offres et écarter celles qui ne corresponde
    - ajouter le reste à « Pending » au format du mode `scan` (`- [ ] {url} | {entreprise} | {intitulé}`) avec la note `agrégateur : Indeed` ; une offre d'agrégateur reste non confirmée tant que l'Évaluateur ne l'a pas trouvée chez l'employeur (`AGENTS.md` › « Aggregator Listings ») ;
    - l'inscrire dans `data/scan-history.tsv` avec `appendToScanHistory` de `scan.mjs`, statut `added`, selon la méthode de `modes/_files.md` › « Recording a stale listing » (fichier JSON écrit avec l'outil de fichiers, jamais l'URL ni le nom dans une commande shell).
 3. **Triage** de chaque ligne ajoutée à ce passage :
-   - lire l'annonce **une seule fois** pour tout le passage (page de l'ATS, ou outils Firecrawl si le site refuse les scripts) et enregistrer son texte brut dans un fichier temporaire hors du dépôt ;
+   - lire l'annonce **une seule fois** pour tout le passage (page de l'ATS, ou outils Firecrawl si le site refuse les scripts : `firecrawl_scrape` avec `maxAge: 0`, une lecture fraîche qui sert aussi de preuve de vivacité à l'Évaluateur) et enregistrer son texte brut dans un fichier temporaire hors du dépôt ;
    - en faire une capture `jds/` avec la commande de `extensions/agents/README.md` › « Enregistrer une capture » (fonctions de `capture-jd.mjs` ; la commande `node capture-jd.mjs --url …` n'écrirait pas la capture, la ligne « Pending » existant déjà). Elle écrit `jds/{date}_{entreprise}_{poste}_{sha256(url)[0:16]}.md`, que l'étape 0 d'`auto-pipeline` retrouve par l'URL (`node capture-jd.mjs --find`) : l'Évaluateur réutilise cette capture au lieu de relire la page ;
    - puis `node posting-guard.mjs --in <fichier> --out <fichier-propre.txt>` et ne trier que le fichier propre ; un signal du garde est noté, jamais suivi ;
    - LinkedIn : appliquer `AGENTS.md` › « LinkedIn JD loading guard ». Ta lecture est la seule tentative de navigateur pour cette offre dans tout le passage (le budget ne se renouvelle pas chez l'Évaluateur). Annonce illisible sans preuve de fermeture : pas de capture, pas de triage, et la ligne devient exactement `- [!] {URL} — JD unavailable; paste text or provide employer URL` (URL LinkedIn d'origine, laissée dans « Pending ») ;
+   - republication : chercher dans le tracker une ligne du même employeur (ou d'une marque du même groupe, quand l'annonce ou la page entreprise le dit) pour le même poste ou un poste proche, sous une autre URL. Si elle existe, ajouter à la ligne « Pending » la note `republication de #NNN` (n° de la ligne du tracker) : l'Évaluateur décide entre doublon et réévaluation ;
    - appliquer le mode `triage` et garder sa ligne `TRIAGE: …` ;
    - `PASS` : la ligne reste dans « Pending » pour l'Évaluateur ;
    - `FAIL` ou `MARGINAL` : écarter comme le fait la barrière « Pre-screen gate » de `modes/pipeline.md` (ligne `- [x] #-- | {url} | skipped (triage {verdict}: {raison})` dans « Processed » et une ligne dans `data/discard.log`) ;
@@ -46,6 +47,6 @@ Ta fonction : trouver les nouvelles offres et écarter celles qui ne corresponde
 
 En quelques lignes :
 - nombre d'offres trouvées (scan, Indeed), écartées au dédoublonnage, triées ;
-- la liste des offres `PASS`, de la meilleure note à la plus basse : `{url} | {entreprise} | {intitulé} | {note}/5` ;
+- la liste des offres `PASS`, de la meilleure note à la plus basse : `{url} | {entreprise} | {intitulé} | {note}/5`, suivi de `| republication de #NNN` pour une republication ;
 - pour chaque offre lue, le chemin de sa capture `jds/` ; les offres LinkedIn déjà tentées ce passage (lisibles ou non) ;
 - les erreurs (portail en échec, page illisible), avec leur cause.

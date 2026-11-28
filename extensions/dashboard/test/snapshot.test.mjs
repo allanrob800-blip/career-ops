@@ -395,3 +395,33 @@ test('followups_due: text present when relances gives one for that num, absent o
   assert.ok(s.followups_due.filter((f) => f.num !== 2).every((f) => !('text' in f)));
   assert.deepEqual(s.followups_due.map((f) => f.num), plain.followups_due.map((f) => f.num)); // a text never makes a follow-up due
 });
+
+// ---- A re-evaluated republication: the row keeps its old URL key, the first linked report names the new posting ----
+test('url and closes_at come from the first linked report, then the tracker URL cell', async () => {
+  const { SCAN_HISTORY_COLUMNS } = await import('../../../lib/scan-history-columns.mjs');
+  const A = 'https://jobs.acme.fr/offres/ancienne-annonce-7';
+  const B = 'https://jobs.acme.fr/offres/nouvelle-annonce-8';
+  const report = (num, url) => ({ num, content: `# Evaluation: Acme — Chef de projet\n\n**Date:** 2026-11-28\n**URL:** ${url}\n**Score:** 4.1/5\n**Legitimacy:** High Confidence\n` });
+  const shRow = (url, day) => SCAN_HISTORY_COLUMNS.map((c) => ({ url, first_seen: '2026-11-28', status: 'added', closes_at: day })[c] ?? '').join('\t');
+  const input = {
+    trackerContent: [
+      '# Applications Tracker', '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |',
+      '|---|---|---|---|---|---|---|---|---|---|',
+      `| 5 | 2026-11-28 | Acme | Chef de projet | 4.1/5 | Evaluated | ❌ | [31](reports/031-acme.md) / [12](reports/012-acme.md) | Re-eval | ${A} |`,
+      `| 6 | 2026-11-28 | Acme | Autre poste | 3.0/5 | Evaluated | ❌ | — | no report | ${A} |`,
+      '',
+    ].join('\n'),
+    statusLogContent: '', followupsContent: '', pipelineContent: '', profileYaml: '', now: NOW,
+    reports: [report(31, B), report(12, A)],
+    scanHistoryContent: `${SCAN_HISTORY_COLUMNS.join('\t')}\n${shRow(A, '2026-12-01')}\n${shRow(B, '2026-12-15')}\n`,
+  };
+  const s = buildSnapshot(input);
+  const five = s.apps.find((a) => a.num === 5);
+  assert.equal(five.report_num, 31);
+  assert.equal(five.url, B);
+  assert.equal(five.closes_at, '2026-12-15');
+  const six = s.apps.find((a) => a.num === 6);
+  assert.equal(six.url, A, 'no report: the tracker URL cell is the fallback');
+  assert.equal(six.closes_at, '2026-12-01');
+});

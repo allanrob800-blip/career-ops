@@ -217,7 +217,9 @@ export function buildSnapshot(input) {
     const status = statusByNum.get(row.num);
     const reportNum = extractTrackerReportNumbers(row.report, row.notes)[0] ?? null;
     const rep = reportNum != null ? reportByNum.get(reportNum) : null;
-    const url = httpsOrNull(row.url) || (rep ? rep.url : null);
+    // The first linked report's URL first, as in select-for-prep.mjs: a re-evaluated republication keeps its row
+    // keyed on the old URL (merge-tracker matches on it) while the new report names the posting that is live.
+    const url = (rep ? rep.url : null) || httpsOrNull(row.url);
     const score = parseFloat(String(row.score || '').replace(/\*/g, ''));
     const date = isoDay(row.date);
     const appliedOn = loggedApplied.get(row.num) || (APPLIED_OR_BEYOND.has(status) ? date : null);

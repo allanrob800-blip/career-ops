@@ -60,7 +60,12 @@ const SPECIFIC = {
     // Republication with a material change: re-evaluation in place, on the existing tracker row (merge-tracker Pass 0).
     'republication de #NNN', '`**Supersedes:** report #NNN`', '## Ce qui a changé', 'jamais une deuxième ligne',
     "même `num`, même `company` et même `role` que la ligne existante", "l'URL de la ligne existante",
-    'node merge-tracker.mjs --dry-run', 'doublon de #NNN'],
+    'node merge-tracker.mjs --dry-run', 'doublon de #NNN',
+    // Fix round 1: sibling-postings pages, the header as a deliberate addition, earlier reports kept, URL key source,
+    // a row keyed on an aggregator URL.
+    'liste d\'autres offres', 'compte comme non confirmée, jamais comme fermée', 'ajout délibéré',
+    '{cellule Report existante telle quelle}', 'du premier rapport lié dans la cellule Report',
+    "la ligne reste indexée sur l'URL de l'agrégateur"],
 };
 
 const EMAIL = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/u;

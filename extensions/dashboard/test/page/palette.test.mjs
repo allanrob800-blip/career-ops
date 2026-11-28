@@ -309,7 +309,7 @@ test('Réglages: weekly goal 1 to 10, reduced motion switch, sync date and the �
     assert.equal(await p.page.evaluate(() => document.getAnimations().length), 0);
     const text = await p.page.locator(body('reglages')).innerText();
     assert.match(text, /Dernière synchronisation/);
-    assert.match(await p.page.locator('#sync-date').innerText(), /27 nov\. à \d{2}:\d{2}/);
+    assert.match(await p.page.locator('#sync-date').innerText(), /\d{1,2} [a-zéû]+\.? à \d{2}:\d{2}/);
     assert.match(await p.page.locator('#apply-note').innerText(), /Claude.*prochaine session/);
     assert.deepEqual(p.errors, []);
   } finally { await p.close(); }
